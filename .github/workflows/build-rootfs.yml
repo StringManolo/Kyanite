@@ -93,7 +93,7 @@ jobs:
           if [ "${{ matrix.debian_arch }}" = "amd64" ]; then
             apt-get download libc6 libgcc-s1
           else
-            apt-get download libc6:arm64 libgcc-s1:arm64 coreutils:arm64
+            apt-get download libc6:arm64 libgcc-s1:arm64 gnu-coreutils:arm64
           fi
 
           # Extraer cada .deb por separado (dpkg-deb -x acepta solo uno)
