@@ -65,26 +65,28 @@ jobs:
           cp init/target/${{ matrix.rust_target }}/release/kyanite-init "$ARCH_DIR/sbin/init"
           cp kpkg/target/${{ matrix.rust_target }}/release/kpkg "$ARCH_DIR/usr/bin/kpkg"
           cp ./brush-install/bin/brush "$ARCH_DIR/bin/brush"
+
+          # Enlace simbólico POSIX para el shell
           ln -sf /bin/brush "$ARCH_DIR/bin/sh"
 
           # 2. Inyectar runtime mínimo de glibc de Debian/Ubuntu
           echo "Inyectando librerías glibc (${{ matrix.debian_arch }})..."
-          
-          # Determinar el prefijo real de la librería según la arquitectura
+
+          # Prefijo real de la librería según arquitectura
           case "${{ matrix.debian_arch }}" in
             amd64) LIB_PREFIX="x86_64-linux-gnu" ;;
             arm64) LIB_PREFIX="aarch64-linux-gnu" ;;
-            *) echo "Arquitectura no soportada"; exit 1 ;;
+            *) echo "Arquitectura no soportada: ${{ matrix.debian_arch }}"; exit 1 ;;
           esac
 
-          # Para arm64, añadir la arquitectura al sistema de paquetes del runner
+          # Para arm64, habilitar la arquitectura en el runner
           if [ "${{ matrix.debian_arch }}" = "arm64" ]; then
             sudo dpkg --add-architecture arm64
             sudo apt-get update -qq
           fi
 
           mkdir deb_extract && cd deb_extract
-          
+
           # Descargar paquetes (sin sufijo _arch)
           if [ "${{ matrix.debian_arch }}" = "amd64" ]; then
             apt-get download libc6 libgcc-s1
@@ -92,7 +94,10 @@ jobs:
             apt-get download libc6:arm64 libgcc-s1:arm64
           fi
 
-          dpkg-deb -x *.deb .
+          # Extraer cada .deb por separado (dpkg-deb -x acepta solo uno)
+          for deb in *.deb; do
+            dpkg-deb -x "$deb" .
+          done
 
           # Copiar a las rutas correctas del rootfs
           cp -P "lib/${LIB_PREFIX}/"* "../$ARCH_DIR/lib/" 2>/dev/null || true
@@ -100,11 +105,10 @@ jobs:
 
           cd .. && rm -rf deb_extract
 
-          # 3. Archivos de configuración base
+          # 3. Archivos de configuración base del sistema
           echo "kyanite" > "$ARCH_DIR/etc/hostname"
           echo "nameserver 1.1.1.1" > "$ARCH_DIR/etc/resolv.conf"
           echo "root:x:0:0:root:/root:/bin/brush" > "$ARCH_DIR/etc/passwd"
-
 
       - name: Compress Rootfs to Tar.Xz & Generate Hash
         run: |
