@@ -50,6 +50,8 @@ jobs:
           cd ..
 
       - name: Build and Install Brush Shell
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
         run: |
           echo "Instalando brush-shell para ${{ matrix.rust_target }}..."
           cargo install brush-shell --target ${{ matrix.rust_target }} --root ./brush-install
