@@ -193,7 +193,7 @@ fn extract_tar_safely<R: Read>(
                 ensure_inside(root, &target)?;
                 // Nota: no creamos el symlink con contenido externo; lo recreamos abajo.
             }
-            EntryType::Char | EntryType::Block | EntryType::Fifo | EntryType::Socket => {
+            EntryType::Char | EntryType::Block | EntryType::Fifo => {
                 return Err(format!(
                     "Refusing to extract special file (type {:?}) — potencialmente malicioso",
                     entry_type
