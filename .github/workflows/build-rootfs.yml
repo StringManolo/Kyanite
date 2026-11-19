@@ -36,6 +36,8 @@ jobs:
           sudo apt-get install -y xz-utils musl-tools build-essential gcc-aarch64-linux-gnu curl
 
       - name: Compile Kyanite Init (PID 1)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
         run: |
           echo "Compilando kyanite-init para ${{ matrix.rust_target }}..."
           cd init
@@ -43,6 +45,8 @@ jobs:
           cd ..
 
       - name: Compile kpkg (Secure Package Manager)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
         run: |
           echo "Compilando kpkg para ${{ matrix.rust_target }}..."
           cd kpkg
@@ -69,10 +73,8 @@ jobs:
           # Enlace simbólico POSIX para el shell
           ln -sf /bin/brush "$ARCH_DIR/bin/sh"
 
-          # 2. Inyectar runtime mínimo de glibc de Debian/Ubuntu
+          # 2. Inyectar runtime mínimo de glibc de Ubuntu/Debian
           echo "Inyectando librerías glibc (${{ matrix.debian_arch }})..."
-
-          # Prefijo real de la librería según arquitectura
           case "${{ matrix.debian_arch }}" in
             amd64) LIB_PREFIX="x86_64-linux-gnu" ;;
             arm64) LIB_PREFIX="aarch64-linux-gnu" ;;
@@ -87,11 +89,11 @@ jobs:
 
           mkdir deb_extract && cd deb_extract
 
-          # Descargar paquetes (sin sufijo _arch)
+          # Descargar paquetes (libc6, libgcc-s1 y coreutils para 'env' en arm64)
           if [ "${{ matrix.debian_arch }}" = "amd64" ]; then
             apt-get download libc6 libgcc-s1
           else
-            apt-get download libc6:arm64 libgcc-s1:arm64
+            apt-get download libc6:arm64 libgcc-s1:arm64 coreutils:arm64
           fi
 
           # Extraer cada .deb por separado (dpkg-deb -x acepta solo uno)
@@ -99,13 +101,24 @@ jobs:
             dpkg-deb -x "$deb" .
           done
 
-          # Copiar a las rutas correctas del rootfs
+          # Copiar libs a las rutas correctas del rootfs
           cp -P "lib/${LIB_PREFIX}/"* "../$ARCH_DIR/lib/" 2>/dev/null || true
           cp -P "usr/lib/${LIB_PREFIX}/"* "../$ARCH_DIR/usr/lib/" 2>/dev/null || true
 
+          # 3. 'env' para shebangs #!/usr/bin/env — de la arquitectura correcta
+          if [ "${{ matrix.debian_arch }}" = "arm64" ]; then
+            # env extraído del .deb arm64 de coreutils
+            cp usr/bin/env "../$ARCH_DIR/usr/bin/env"
+          fi
+
           cd .. && rm -rf deb_extract
 
-          # 3. Archivos de configuración base del sistema
+          # amd64: el env del runner ya es de la arquitectura correcta
+          if [ "${{ matrix.debian_arch }}" = "amd64" ]; then
+            cp /usr/bin/env "$ARCH_DIR/usr/bin/env"
+          fi
+
+          # 4. Archivos de configuración base del sistema
           echo "kyanite" > "$ARCH_DIR/etc/hostname"
           echo "nameserver 1.1.1.1" > "$ARCH_DIR/etc/resolv.conf"
           echo "root:x:0:0:root:/root:/bin/brush" > "$ARCH_DIR/etc/passwd"
@@ -114,26 +127,28 @@ jobs:
         run: |
           ARCHIVE_NAME="kyanite-rootfs-${{ matrix.arch }}.tar.xz"
           HASH_NAME="${ARCHIVE_NAME}.sha256"
-          
+
           echo "Comprimiendo rootfs con xz (máxima compresión)..."
           tar --numeric-owner -cf - -C "rootfs-${{ matrix.arch }}" . | xz -9 -T0 > "$ARCHIVE_NAME"
-          
+
           echo "Generando hash SHA256 independiente..."
           sha256sum "$ARCHIVE_NAME" > "$HASH_NAME"
-          
+
           ls -lh "$ARCHIVE_NAME" "$HASH_NAME"
 
       - name: Upload Clean Rootfs Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kyanite-rootfs-${{ matrix.arch }}
           path: kyanite-rootfs-${{ matrix.arch }}.tar.xz
+          archive: false
 
       - name: Upload SHA256 Checksum Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kyanite-rootfs-${{ matrix.arch }}-sha256
           path: kyanite-rootfs-${{ matrix.arch }}.tar.xz.sha256
+          archive: false
 
       - name: Release to GitHub
         if: startsWith(github.ref, 'refs/tags/v')
