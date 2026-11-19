@@ -38,7 +38,8 @@ jobs:
       - name: Compile Kyanite Init (PID 1)
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
-          RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
         run: |
           cd init
           cargo build --release --target ${{ matrix.rust_target }}
@@ -47,7 +48,8 @@ jobs:
       - name: Compile kpkg (Secure Package Manager)
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
-          RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
         run: |
           cd kpkg
           cargo build --release --target ${{ matrix.rust_target }}
@@ -57,6 +59,7 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
         run: |
           cargo install brush-shell --target ${{ matrix.rust_target }} --root ./brush-install
 
@@ -71,7 +74,7 @@ jobs:
           cp ./brush-install/bin/brush "$ARCH_DIR/bin/brush"
           ln -sf /bin/brush "$ARCH_DIR/bin/sh"
 
-          # 2. Runtime glibc de Ubuntu
+          # 2. Runtime glibc
           echo "Inyectando librerías glibc (${{ matrix.debian_arch }})..."
           case "${{ matrix.debian_arch }}" in
             amd64) LIB_PREFIX="x86_64-linux-gnu" ;;
@@ -99,15 +102,15 @@ jobs:
           cp -P "lib/${LIB_PREFIX}/"* "../$ARCH_DIR/lib/" 2>/dev/null || true
           cp -P "usr/lib/${LIB_PREFIX}/"* "../$ARCH_DIR/usr/lib/" 2>/dev/null || true
 
-          # Dynamic linker (arm64 lo tiene directamente en /lib/)
+          # Dynamic linker en /lib/ (arm64: /lib/ld-linux-aarch64.so.1)
           cp -P lib/ld-linux-* "../$ARCH_DIR/lib/" 2>/dev/null || true
 
-          # x86_64: ELF interpreter se busca en /lib64/ld-linux-x86-64.so.2
+          # x86_64: ELF interpreter se resuelve en /lib64/
           if [ "${{ matrix.debian_arch }}" = "amd64" ]; then
             ln -sf "/lib/ld-linux-x86-64.so.2" "../$ARCH_DIR/lib64/ld-linux-x86-64.so.2"
           fi
 
-          # 3. env (arm64: del .deb, manejando env/gnuenv según versión de Ubuntu)
+          # 3. env (arm64: del .deb, tolerando env o gnuenv)
           if [ "${{ matrix.debian_arch }}" = "arm64" ]; then
             if [ -f usr/bin/env ]; then
               cp usr/bin/env "../$ARCH_DIR/usr/bin/env"
