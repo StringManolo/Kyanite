@@ -30,10 +30,10 @@ jobs:
         with:
           targets: ${{ matrix.rust_target }}
 
-      - name: Install build dependencies (xz-utils, musl-tools, build-essential)
+      - name: Install build dependencies (xz-utils, musl-tools, build-essential, gcc-aarch64-linux-gnu)
         run: |
           sudo apt-get update
-          sudo apt-get install -y xz-utils musl-tools build-essential curl
+          sudo apt-get install -y xz-utils musl-tools build-essential gcc-aarch64-linux-gnu curl
 
       - name: Compile Kyanite Init (PID 1)
         run: |
