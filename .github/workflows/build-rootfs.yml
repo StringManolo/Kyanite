@@ -1,0 +1,118 @@
+name: Build Kyanite Rootfs
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Kyanite for ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: aarch64
+            rust_target: aarch64-unknown-linux-musl
+            debian_arch: arm64
+          - arch: x86_64
+            rust_target: x86_64-unknown-linux-musl
+            debian_arch: amd64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Install build dependencies (xz-utils, musl-tools, build-essential)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xz-utils musl-tools build-essential curl
+
+      - name: Compile Kyanite Init (PID 1)
+        run: |
+          echo "Compilando kyanite-init para ${{ matrix.rust_target }}..."
+          cd init
+          cargo build --release --target ${{ matrix.rust_target }}
+          cd ..
+
+      - name: Compile kpkg (Secure Package Manager)
+        run: |
+          echo "Compilando kpkg para ${{ matrix.rust_target }}..."
+          cd kpkg
+          cargo build --release --target ${{ matrix.rust_target }}
+          cd ..
+
+      - name: Build and Install Brush Shell
+        run: |
+          echo "Instalando brush-shell para ${{ matrix.rust_target }}..."
+          cargo install brush-shell --target ${{ matrix.rust_target }} --root ./brush-install
+
+      - name: Assemble Kyanite Rootfs Structure
+        run: |
+          ARCH_DIR="rootfs-${{ matrix.arch }}"
+          mkdir -p "$ARCH_DIR"/{bin,sbin,lib,usr/bin,usr/lib,etc,proc,sys,dev,tmp}
+
+          # 1. Copiar binarios compilados en Rust al rootfs
+          cp init/target/${{ matrix.rust_target }}/release/kyanite-init "$ARCH_DIR/sbin/init"
+          cp kpkg/target/${{ matrix.rust_target }}/release/kpkg "$ARCH_DIR/usr/bin/kpkg"
+          cp ./brush-install/bin/brush "$ARCH_DIR/bin/brush"
+          
+          # Enlace simbólico POSIX para el shell
+          ln -sf /bin/brush "$ARCH_DIR/bin/sh"
+
+          # 2. Inyectar runtime mínimo de glibc de Debian para compatibilidad de binarios externos
+          echo "Inyectando librerías glibc (${{ matrix.debian_arch }})..."
+          mkdir deb_extract && cd deb_extract
+          apt-get download libc6_${{ matrix.debian_arch }} libgcc-s1_${{ matrix.debian_arch }}
+          dpkg-deb -x *.deb .
+          
+          cp -P lib/${{ matrix.debian_arch }}-linux-gnu/* "../$ARCH_DIR/lib/" || true
+          cp -P usr/lib/${{ matrix.debian_arch }}-linux-gnu/* "../$ARCH_DIR/usr/lib/" || true
+          cd .. && rm -rf deb_extract
+
+          # 3. Archivos de configuración base del sistema
+          echo "kyanite" > "$ARCH_DIR/etc/hostname"
+          echo "nameserver 1.1.1.1" > "$ARCH_DIR/etc/resolv.conf"
+          echo "root:x:0:0:root:/root:/bin/brush" > "$ARCH_DIR/etc/passwd"
+
+      - name: Compress Rootfs to Tar.Xz & Generate Hash
+        run: |
+          ARCHIVE_NAME="kyanite-rootfs-${{ matrix.arch }}.tar.xz"
+          HASH_NAME="${ARCHIVE_NAME}.sha256"
+          
+          echo "Comprimiendo rootfs con xz (máxima compresión)..."
+          tar --numeric-owner -cf - -C "rootfs-${{ matrix.arch }}" . | xz -9 -T0 > "$ARCHIVE_NAME"
+          
+          echo "Generando hash SHA256 independiente..."
+          sha256sum "$ARCHIVE_NAME" > "$HASH_NAME"
+          
+          ls -lh "$ARCHIVE_NAME" "$HASH_NAME"
+
+      - name: Upload Clean Rootfs Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kyanite-rootfs-${{ matrix.arch }}
+          path: kyanite-rootfs-${{ matrix.arch }}.tar.xz
+
+      - name: Upload SHA256 Checksum Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kyanite-rootfs-${{ matrix.arch }}-sha256
+          path: kyanite-rootfs-${{ matrix.arch }}.tar.xz.sha256
+
+      - name: Release to GitHub
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            kyanite-rootfs-${{ matrix.arch }}.tar.xz
+            kyanite-rootfs-${{ matrix.arch }}.tar.xz.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

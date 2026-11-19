@@ -1,0 +1,13 @@
+[package]
+name = "kpkg"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ureq = "2.9"
+xz2 = "0.1"
+flate2 = "1.0"
+tar = "0.4"
+ar = "0.3"
+sha2 = "0.10"
+hex = "0.4"
