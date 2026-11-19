@@ -30,7 +30,7 @@ jobs:
         with:
           targets: ${{ matrix.rust_target }}
 
-      - name: Install build dependencies (xz-utils, musl-tools, build-essential, gcc-aarch64-linux-gnu)
+      - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y xz-utils musl-tools build-essential gcc-aarch64-linux-gnu curl
@@ -38,8 +38,8 @@ jobs:
       - name: Compile Kyanite Init (PID 1)
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+          RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
         run: |
-          echo "Compilando kyanite-init para ${{ matrix.rust_target }}..."
           cd init
           cargo build --release --target ${{ matrix.rust_target }}
           cd ..
@@ -47,8 +47,8 @@ jobs:
       - name: Compile kpkg (Secure Package Manager)
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+          RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
         run: |
-          echo "Compilando kpkg para ${{ matrix.rust_target }}..."
           cd kpkg
           cargo build --release --target ${{ matrix.rust_target }}
           cd ..
@@ -56,32 +56,29 @@ jobs:
       - name: Build and Install Brush Shell
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
         run: |
-          echo "Instalando brush-shell para ${{ matrix.rust_target }}..."
           cargo install brush-shell --target ${{ matrix.rust_target }} --root ./brush-install
 
       - name: Assemble Kyanite Rootfs Structure
         run: |
           ARCH_DIR="rootfs-${{ matrix.arch }}"
-          mkdir -p "$ARCH_DIR"/{bin,sbin,lib,usr/bin,usr/lib,etc,proc,sys,dev,tmp}
+          mkdir -p "$ARCH_DIR"/{bin,sbin,lib,lib64,usr/bin,usr/lib,etc,proc,sys,dev,tmp}
 
-          # 1. Copiar binarios compilados en Rust al rootfs
+          # 1. Binarios Rust
           cp init/target/${{ matrix.rust_target }}/release/kyanite-init "$ARCH_DIR/sbin/init"
           cp kpkg/target/${{ matrix.rust_target }}/release/kpkg "$ARCH_DIR/usr/bin/kpkg"
           cp ./brush-install/bin/brush "$ARCH_DIR/bin/brush"
-
-          # Enlace simbólico POSIX para el shell
           ln -sf /bin/brush "$ARCH_DIR/bin/sh"
 
-          # 2. Inyectar runtime mínimo de glibc de Ubuntu/Debian
+          # 2. Runtime glibc de Ubuntu
           echo "Inyectando librerías glibc (${{ matrix.debian_arch }})..."
           case "${{ matrix.debian_arch }}" in
             amd64) LIB_PREFIX="x86_64-linux-gnu" ;;
             arm64) LIB_PREFIX="aarch64-linux-gnu" ;;
-            *) echo "Arquitectura no soportada: ${{ matrix.debian_arch }}"; exit 1 ;;
+            *) echo "Arquitectura no soportada"; exit 1 ;;
           esac
 
-          # Para arm64, habilitar la arquitectura en el runner
           if [ "${{ matrix.debian_arch }}" = "arm64" ]; then
             sudo dpkg --add-architecture arm64
             sudo apt-get update -qq
@@ -89,36 +86,48 @@ jobs:
 
           mkdir deb_extract && cd deb_extract
 
-          # Descargar paquetes (libc6, libgcc-s1 y coreutils para 'env' en arm64)
           if [ "${{ matrix.debian_arch }}" = "amd64" ]; then
             apt-get download libc6 libgcc-s1
           else
             apt-get download libc6:arm64 libgcc-s1:arm64 gnu-coreutils:arm64
           fi
 
-          # Extraer cada .deb por separado (dpkg-deb -x acepta solo uno)
           for deb in *.deb; do
             dpkg-deb -x "$deb" .
           done
 
-          # Copiar libs a las rutas correctas del rootfs
           cp -P "lib/${LIB_PREFIX}/"* "../$ARCH_DIR/lib/" 2>/dev/null || true
           cp -P "usr/lib/${LIB_PREFIX}/"* "../$ARCH_DIR/usr/lib/" 2>/dev/null || true
 
-          # 3. 'env' para shebangs #!/usr/bin/env — de la arquitectura correcta
+          # Dynamic linker (arm64 lo tiene directamente en /lib/)
+          cp -P lib/ld-linux-* "../$ARCH_DIR/lib/" 2>/dev/null || true
+
+          # x86_64: ELF interpreter se busca en /lib64/ld-linux-x86-64.so.2
+          if [ "${{ matrix.debian_arch }}" = "amd64" ]; then
+            ln -sf "/lib/ld-linux-x86-64.so.2" "../$ARCH_DIR/lib64/ld-linux-x86-64.so.2"
+          fi
+
+          # 3. env (arm64: del .deb, manejando env/gnuenv según versión de Ubuntu)
           if [ "${{ matrix.debian_arch }}" = "arm64" ]; then
-            # env extraído del .deb arm64 de coreutils
-            cp usr/bin/gnuenv "../$ARCH_DIR/usr/bin/env"
+            if [ -f usr/bin/env ]; then
+              cp usr/bin/env "../$ARCH_DIR/usr/bin/env"
+            elif [ -f usr/bin/gnuenv ]; then
+              cp usr/bin/gnuenv "../$ARCH_DIR/usr/bin/env"
+            else
+              echo "ERROR: no se encontró 'env' ni 'gnuenv' en gnu-coreutils:arm64"
+              ls -la usr/bin/ | head -50
+              exit 1
+            fi
           fi
 
           cd .. && rm -rf deb_extract
 
-          # amd64: el env del runner ya es de la arquitectura correcta
+          # amd64: env del runner (misma arquitectura)
           if [ "${{ matrix.debian_arch }}" = "amd64" ]; then
             cp /usr/bin/env "$ARCH_DIR/usr/bin/env"
           fi
 
-          # 4. Archivos de configuración base del sistema
+          # 4. Configuración base
           echo "kyanite" > "$ARCH_DIR/etc/hostname"
           echo "nameserver 1.1.1.1" > "$ARCH_DIR/etc/resolv.conf"
           echo "root:x:0:0:root:/root:/bin/brush" > "$ARCH_DIR/etc/passwd"
@@ -127,13 +136,8 @@ jobs:
         run: |
           ARCHIVE_NAME="kyanite-rootfs-${{ matrix.arch }}.tar.xz"
           HASH_NAME="${ARCHIVE_NAME}.sha256"
-
-          echo "Comprimiendo rootfs con xz (máxima compresión)..."
           tar --numeric-owner -cf - -C "rootfs-${{ matrix.arch }}" . | xz -9 -T0 > "$ARCHIVE_NAME"
-
-          echo "Generando hash SHA256 independiente..."
           sha256sum "$ARCHIVE_NAME" > "$HASH_NAME"
-
           ls -lh "$ARCHIVE_NAME" "$HASH_NAME"
 
       - name: Upload Clean Rootfs Artifact
