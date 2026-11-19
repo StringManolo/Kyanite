@@ -1,49 +1,45 @@
-use std::process;
+use nix::sys::wait::{waitpid, WaitStatus, WaitPidFlag};
+use nix::errno::Errno;
 use std::thread;
 use std::time::Duration;
-use nix::sys::signal::{sigaction, SigAction, SigFlag, SigSet, SaFlags};
-use nix::unistd::pid_t;
 
-extern "C" fn handle_sigchld(_sig: i32) {
-    // Bucle para recolectar todos los procesos zombie hijos huérfanos
+fn main() {
+    println!("[init] Kyanite PID 1 initialized successfully.");
+    println!("[init] Starting process reaper loop...");
+
+    // Main loop for PID 1: Reap zombie processes continuously
     loop {
-        match nix::sys::wait::waitpid(
-            nix::unistd::Pid::from_raw(-1),
-            Some(nix::sys::wait::WaitPidFlag::WNOHANG),
-        ) {
-            Ok(res) => match res {
-                nix::sys::wait::WaitStatus::StillAlive => break,
-                nix::sys::wait::WaitStatus::Exited(pid, _) => {
-                    // Proceso hijo terminado normalmente
-                    let _ = pid;
-                }
-                nix::sys::wait::WaitStatus::Signaled(pid, sig, _) => {
-                    // Proceso hijo terminado por una señal
-                    let _ = (pid, sig);
-                }
-                _ => {}
-            },
-            Err(_) => break, // No quedan hijos por recolectar
-        }
+        reap_children();
+        
+        // Sleep briefly to prevent 100% CPU usage on busy-waiting
+        thread::sleep(Duration::from_millis(50));
     }
 }
 
-fn main() {
-    println!("Kyanite Init (PID 1) started in PRoot enviroment.");
-
-    // 1. Configurar el manejo de señales para recolectar zombies (SIGCHLD)
-    unsafe {
-        let sa = SigAction::new(
-            nix::sys::signal::SigHandler::Handler(handle_sigchld),
-            SaFlags::SA_RESTART,
-            SigSet::empty(),
-        );
-        let _ = sigaction(nix::sys::signal::Signal::SIGCHLD, &sa);
-    }
-
-    // 2. Bucle principal del PID 1
-    // En PRoot, el init se mantiene a la escucha y recolectando procesos en segundo plano.
+/// Reaps all terminated zombie child processes
+pub fn reap_children() {
     loop {
-        thread::sleep(Duration::from_secs(3600));
+        // Wait for any child process without blocking (WNOHANG)
+        match waitpid(None, Some(WaitPidFlag::WNOHANG)) {
+            Ok(WaitStatus::StillAlive) => {
+                // No more exited children to reap at this moment
+                break;
+            }
+            Ok(WaitStatus::Exited(pid, status)) => {
+                println!("[init] Child process (PID {}) exited with status {}", pid, status);
+            }
+            Ok(WaitStatus::Signaled(pid, signal, core_dumped)) => {
+                println!("[init] Child process (PID {}) killed by signal {:?} (core dumped: {})", pid, signal, core_dumped);
+            }
+            Err(Errno::ECHILD) => {
+                // ECHILD means there are no child processes left to wait for
+                break;
+            }
+            Err(e) => {
+                eprintln!("[init] Warning: waitpid failed: {}", e);
+                break;
+            }
+            _ => {}
+        }
     }
 }

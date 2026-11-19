@@ -4,4 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-nix = { version = "0.29", features = ["process", "signal", "wait", "term"] }
+nix = { version = "0.29", features = ["process"] }
+
+# Optimizaciones recomendadas para producción / PID 1 minimalista
+[profile.release]
+opt-level = "s"      # Optimizar para tamaño de binario (también puedes usar 3 para velocidad máxima)
+lto = true           # Link Time Optimization para reducir tamaño y mejorar rendimiento
+codegen-units = 1    # Mejora las optimizaciones de LTO
+panic = "abort"      # Reduce el tamaño del binario eliminando el soporte de unwinding de pánico
+strip = true         # Elimina símbolos de depuración automáticamente del binario release

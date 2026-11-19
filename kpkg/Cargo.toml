@@ -11,3 +11,11 @@ tar = "0.4"
 ar = "0.3"
 sha2 = "0.10"
 hex = "0.4"
+
+# Optimizaciones de tamaño y rendimiento para binarios estáticos (musl)
+[profile.release]
+opt-level = "s"      # Optimizar para tamaño reducido del binario
+lto = true           # Link Time Optimization para reducir tamaño y mejorar rendimiento
+codegen-units = 1    # Necesario para habilitar LTO de forma efectiva
+panic = "abort"      # Elimina el código de unwinding, reduciendo drásticamente los MB del binario
+strip = true         # Elimina símbolos de depuración automáticamente en release
