@@ -108,7 +108,7 @@ jobs:
           # 3. 'env' para shebangs #!/usr/bin/env — de la arquitectura correcta
           if [ "${{ matrix.debian_arch }}" = "arm64" ]; then
             # env extraído del .deb arm64 de coreutils
-            cp usr/bin/env "../$ARCH_DIR/usr/bin/env"
+            cp usr/bin/gnuenv "../$ARCH_DIR/usr/bin/env"
           fi
 
           cd .. && rm -rf deb_extract
