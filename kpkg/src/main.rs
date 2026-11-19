@@ -139,7 +139,7 @@ fn extract_deb_payload(deb_bytes: &[u8]) -> Result<(), Box<dyn Error>> {
 
     while let Some(entry_result) = archive.next_entry() {
         let mut entry = entry_result?;
-        let name = entry.header().identifier()?.to_string();
+        let name = entry.header().identifier().to_string();
 
         if name.starts_with("data.tar") {
             let mut data_bytes = Vec::new();
