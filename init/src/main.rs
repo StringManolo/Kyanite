@@ -1,4 +1,5 @@
 use nix::errno::Errno;
+use nix::libc;
 use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
 use nix::unistd::{fork, ForkResult, Pid};
 
@@ -240,12 +241,61 @@ fn choose_mode(help: &str) -> usize {
 // LANZAR EL SHELL INTERACTIVO
 // ============================================================
 
+// ------------------------------------------------------------
+// JOB CONTROL / TTY
+// ------------------------------------------------------------
+// Brush se pone a si mismo en un grupo de procesos nuevo (pgrp = su PID).
+// Si ese grupo no es el grupo en primer plano del tty, cada lectura del
+// teclado le manda SIGTTIN. Por eso init hace de "login": crea el grupo
+// y se lo entrega al shell como primer plano ANTES del exec.
+
+fn ignore_sigttou() {
+    // Necesario para poder llamar a tcsetpgrp() desde un grupo en segundo plano.
+    unsafe {
+        libc::signal(libc::SIGTTOU, libc::SIG_IGN);
+    }
+}
+
+/// Se ejecuta en el hijo, justo antes del exec.
+fn child_job_control() {
+    unsafe {
+        let pid = libc::getpid();
+
+        if libc::setpgid(0, 0) != 0 {
+            log(&format!("setpgid(0, 0) FALLO: {}", io::Error::last_os_error()));
+        }
+
+        if libc::tcsetpgrp(0, pid) != 0 {
+            log(&format!("tcsetpgrp(0, {}) FALLO: {}", pid, io::Error::last_os_error()));
+        } else {
+            log(&format!("tcsetpgrp(0, {}) OK: el shell es el grupo en primer plano", pid));
+        }
+
+        // El shell recibe las senales de job control con la accion por defecto.
+        libc::signal(libc::SIGTTOU, libc::SIG_DFL);
+        libc::signal(libc::SIGTTIN, libc::SIG_DFL);
+        libc::signal(libc::SIGTSTP, libc::SIG_DFL);
+    }
+}
+
+/// Devuelve el tty a init cuando el shell termina (para poder leer el menu).
+fn reclaim_tty() {
+    unsafe {
+        let pgrp = libc::getpgrp();
+        if libc::tcsetpgrp(0, pgrp) != 0 {
+            log(&format!("tcsetpgrp(0, {}) FALLO al recuperar el tty: {}", pgrp, io::Error::last_os_error()));
+        }
+    }
+}
+
 fn start_shell(args: &[&str]) -> Result<Pid, Errno> {
     let _ = io::stdout().flush();
     let _ = io::stderr().flush();
 
     match unsafe { fork()? } {
         ForkResult::Child => {
+            child_job_control();
+
             let error = Command::new(SHELL_PATH)
                 .args(args)
                 .env("SHELL", SHELL_PATH)
@@ -385,6 +435,7 @@ fn main() {
     log("          KYANITE INIT");
     log("========================================");
     log(&format!("Init PID: {}", std::process::id()));
+    ignore_sigttou();
 
     log_environment();
     let help = log_brush_info();
@@ -426,6 +477,8 @@ fn main() {
                 127
             }
         };
+
+        reclaim_tty();
 
         if code == 0 || !BOOT_MENU || attempts >= MAX_ATTEMPTS || started.elapsed() > QUICK_EXIT {
             log("Kyanite session is shutting down.");
