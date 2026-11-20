@@ -4,7 +4,8 @@
 - Check why x86 build is double the size of arm
 
 ### Security
-- Check for env replacement for a Rust version
+- Check for env replacement for a Rust version 
+- Check all files 1 by 1. 
 
 ### Quality Of Life
 - Add better logs to init

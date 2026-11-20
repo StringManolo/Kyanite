@@ -110,20 +110,20 @@ jobs:
           ARCH_DIR="rootfs-${{ matrix.arch }}"
           DEBIAN_ARCH="${{ matrix.debian_arch }}"
 
-          mkdir -p "$ARCH_DIR"/{
-            bin,
-            sbin,
-            lib,
-            lib64,
-            usr/bin,
-            usr/lib,
-            etc,
-            proc,
-            sys,
-            dev,
-            tmp,
-            root
-          }
+
+          mkdir -p \
+            "$ARCH_DIR/bin" \
+            "$ARCH_DIR/sbin" \
+            "$ARCH_DIR/lib" \
+            "$ARCH_DIR/lib64" \
+            "$ARCH_DIR/usr/bin" \
+            "$ARCH_DIR/usr/lib" \
+            "$ARCH_DIR/etc" \
+            "$ARCH_DIR/proc" \
+            "$ARCH_DIR/sys" \
+            "$ARCH_DIR/dev" \
+            "$ARCH_DIR/tmp" \
+            "$ARCH_DIR/root"
 
           # --------------------------------------------------------
           # 7.1 Rust binaries
