@@ -1,0 +1,401 @@
+name: Build Kyanite Rootfs
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Kyanite for ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - arch: aarch64
+            rust_target: aarch64-unknown-linux-musl
+            debian_arch: arm64
+          - arch: x86_64
+            rust_target: x86_64-unknown-linux-musl
+            debian_arch: amd64
+
+    steps:
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ============================================================
+      # 2. RUST TOOLCHAIN
+      # ============================================================
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      # ============================================================
+      # 3. BUILD DEPENDENCIES
+      # ============================================================
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xz-utils \
+            musl-tools \
+            build-essential \
+            gcc-aarch64-linux-gnu \
+            curl \
+            binutils
+
+      # ============================================================
+      # 4. COMPILE KYANITE INIT (PID 1)
+      # ============================================================
+
+      - name: Compile Kyanite Init (PID 1)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
+        run: |
+          cd init
+          cargo build --release --target ${{ matrix.rust_target }}
+          cd ..
+
+      # ============================================================
+      # 5. COMPILE KPKG
+      # ============================================================
+
+      - name: Compile kpkg (Secure Package Manager)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
+        run: |
+          cd kpkg
+          cargo build --release --target ${{ matrix.rust_target }}
+          cd ..
+
+      # ============================================================
+      # 6. BUILD BRUSH SHELL
+      # ============================================================
+
+      - name: Build and Install Brush Shell
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
+        run: |
+          cargo install brush-shell \
+            --target ${{ matrix.rust_target }} \
+            --root ./brush-install
+
+      # ============================================================
+      # 7. ASSEMBLE ROOTFS
+      # ============================================================
+
+      - name: Assemble Kyanite Rootfs Structure
+        run: |
+          set -euo pipefail
+
+          ARCH_DIR="rootfs-${{ matrix.arch }}"
+          DEBIAN_ARCH="${{ matrix.debian_arch }}"
+
+
+          mkdir -p \
+            "$ARCH_DIR/bin" \
+            "$ARCH_DIR/sbin" \
+            "$ARCH_DIR/lib" \
+            "$ARCH_DIR/lib64" \
+            "$ARCH_DIR/usr/bin" \
+            "$ARCH_DIR/usr/lib" \
+            "$ARCH_DIR/etc" \
+            "$ARCH_DIR/proc" \
+            "$ARCH_DIR/sys" \
+            "$ARCH_DIR/dev" \
+            "$ARCH_DIR/tmp" \
+            "$ARCH_DIR/root"
+
+          # --------------------------------------------------------
+          # 7.1 Rust binaries
+          # --------------------------------------------------------
+
+          echo "Installing Kyanite binaries..."
+
+          install -m 0755 \
+            "init/target/${{ matrix.rust_target }}/release/kyanite-init" \
+            "$ARCH_DIR/sbin/init"
+
+          install -m 0755 \
+            "kpkg/target/${{ matrix.rust_target }}/release/kpkg" \
+            "$ARCH_DIR/usr/bin/kpkg"
+
+          install -m 0755 \
+            "./brush-install/bin/brush" \
+            "$ARCH_DIR/bin/brush"
+
+          # --------------------------------------------------------
+          # 7.2 Shell entry point
+          # --------------------------------------------------------
+
+          echo "Configuring Kyanite startup..."
+
+          # The generic ProotLauncher selects /bin/sh because
+          # Kyanite does not contain Bash.
+          #
+          # /bin/sh -> /sbin/init
+          #
+          # This makes kyanite-init the initial process.
+
+          ln -sfn /sbin/init "$ARCH_DIR/bin/sh"
+
+          # --------------------------------------------------------
+          # 7.3 Architecture configuration
+          # --------------------------------------------------------
+
+          case "$DEBIAN_ARCH" in
+            amd64)
+              LIB_PREFIX="x86_64-linux-gnu"
+              LOADER_NAME="ld-linux-x86-64.so.2"
+              ;;
+            arm64)
+              LIB_PREFIX="aarch64-linux-gnu"
+              LOADER_NAME="ld-linux-aarch64.so.1"
+              ;;
+            *)
+              echo "ERROR: Unsupported architecture: $DEBIAN_ARCH"
+              exit 1
+              ;;
+          esac
+
+          # --------------------------------------------------------
+          # 7.4 Download glibc runtime
+          # --------------------------------------------------------
+
+          echo "Downloading glibc runtime ($DEBIAN_ARCH)..."
+
+          if [ "$DEBIAN_ARCH" = "arm64" ]; then
+            sudo dpkg --add-architecture arm64
+            sudo apt-get update -qq
+          fi
+
+          mkdir deb_extract
+          cd deb_extract
+
+          if [ "$DEBIAN_ARCH" = "amd64" ]; then
+            apt-get download libc6 libgcc-s1
+          else
+            apt-get download \
+              libc6:arm64 \
+              libgcc-s1:arm64 \
+              gnu-coreutils:arm64
+          fi
+
+          # --------------------------------------------------------
+          # 7.5 Extract Debian packages
+          # --------------------------------------------------------
+
+          for deb in *.deb; do
+            dpkg-deb -x "$deb" .
+          done
+
+          # --------------------------------------------------------
+          # 7.6 Install multiarch libraries
+          # --------------------------------------------------------
+
+          echo "Installing multiarch libraries..."
+
+          if [ -d "lib/$LIB_PREFIX" ]; then
+            cp -a "lib/$LIB_PREFIX/." "../$ARCH_DIR/lib/"
+          fi
+
+          if [ -d "usr/lib/$LIB_PREFIX" ]; then
+            cp -a "usr/lib/$LIB_PREFIX/." "../$ARCH_DIR/usr/lib/"
+          fi
+
+          # --------------------------------------------------------
+          # 7.7 Install the actual dynamic linker
+          # --------------------------------------------------------
+
+          echo "Locating dynamic linker: $LOADER_NAME"
+
+          # Do not copy a potentially broken absolute symlink.
+          # Locate the actual loader binary inside the extracted
+          # Debian packages and install it directly into /lib.
+
+          LOADER_SOURCE="$(
+            find . -type f -name "$LOADER_NAME" -print -quit
+          )"
+
+          if [ -z "$LOADER_SOURCE" ]; then
+            echo "ERROR: Dynamic linker not found: $LOADER_NAME"
+            echo "Available loader candidates:"
+            find . -name 'ld-linux*' -ls || true
+            exit 1
+          fi
+
+          echo "Found loader: $LOADER_SOURCE"
+
+          install -D -m 0755 \
+            "$LOADER_SOURCE" \
+            "../$ARCH_DIR/lib/$LOADER_NAME"
+
+          # --------------------------------------------------------
+          # 7.8 AMD64 ELF interpreter compatibility
+          # --------------------------------------------------------
+
+          if [ "$DEBIAN_ARCH" = "amd64" ]; then
+
+            # x86_64 ELF binaries normally request:
+            # /lib64/ld-linux-x86-64.so.2
+
+            ln -sfn \
+              "/lib/$LOADER_NAME" \
+              "../$ARCH_DIR/lib64/$LOADER_NAME"
+
+          fi
+
+          # --------------------------------------------------------
+          # 7.9 Install env
+          # --------------------------------------------------------
+
+          echo "Installing env..."
+
+          if [ "$DEBIAN_ARCH" = "arm64" ]; then
+
+            if [ -f usr/bin/env ]; then
+              cp -L usr/bin/env "../$ARCH_DIR/usr/bin/env"
+
+            elif [ -f usr/bin/gnuenv ]; then
+              cp -L usr/bin/gnuenv "../$ARCH_DIR/usr/bin/env"
+
+            else
+              echo "ERROR: env/gnuenv not found in gnu-coreutils:arm64"
+              ls -la usr/bin/ | head -50
+              exit 1
+            fi
+
+          fi
+
+          cd ..
+          rm -rf deb_extract
+
+          # AMD64 env comes from the native Ubuntu runner.
+
+          if [ "$DEBIAN_ARCH" = "amd64" ]; then
+            install -m 0755 /usr/bin/env "$ARCH_DIR/usr/bin/env"
+          fi
+
+          # --------------------------------------------------------
+          # 7.10 Verify dynamic linker
+          # --------------------------------------------------------
+
+          echo "Verifying dynamic linker..."
+
+          test -f "$ARCH_DIR/lib/$LOADER_NAME"
+
+          if [ "$DEBIAN_ARCH" = "amd64" ]; then
+            test -L "$ARCH_DIR/lib64/$LOADER_NAME"
+            test -e "$ARCH_DIR/lib64/$LOADER_NAME"
+          fi
+
+          # --------------------------------------------------------
+          # 7.11 Base system configuration
+          # --------------------------------------------------------
+
+          echo "kyanite" > "$ARCH_DIR/etc/hostname"
+
+          echo "nameserver 1.1.1.1" > "$ARCH_DIR/etc/resolv.conf"
+
+          echo "root:x:0:0:root:/root:/bin/brush" \
+            > "$ARCH_DIR/etc/passwd"
+
+          echo "root:x:0:" > "$ARCH_DIR/etc/group"
+
+          chmod 1777 "$ARCH_DIR/tmp"
+
+          # --------------------------------------------------------
+          # 7.12 Final rootfs checks
+          # --------------------------------------------------------
+
+          echo ""
+          echo "========== ROOTFS VERIFICATION =========="
+
+          ls -l "$ARCH_DIR/sbin/init"
+          ls -l "$ARCH_DIR/bin/brush"
+          ls -l "$ARCH_DIR/bin/sh"
+          ls -l "$ARCH_DIR/usr/bin/env"
+          ls -l "$ARCH_DIR/lib/$LOADER_NAME"
+
+          if [ "$DEBIAN_ARCH" = "amd64" ]; then
+            ls -l "$ARCH_DIR/lib64/$LOADER_NAME"
+          fi
+
+          echo ""
+          echo "Kyanite rootfs assembled successfully."
+
+      # ============================================================
+      # 8. COMPRESS ROOTFS AND GENERATE SHA256
+      # ============================================================
+
+      - name: Compress Rootfs to Tar.Xz & Generate Hash
+        run: |
+          set -euo pipefail
+
+          ARCHIVE_NAME="kyanite-rootfs-${{ matrix.arch }}.tar.xz"
+          HASH_NAME="${ARCHIVE_NAME}.sha256"
+
+          tar --numeric-owner \
+            -cf - \
+            -C "rootfs-${{ matrix.arch }}" . \
+            | xz -9 -T0 > "$ARCHIVE_NAME"
+
+          sha256sum "$ARCHIVE_NAME" > "$HASH_NAME"
+
+          ls -lh "$ARCHIVE_NAME" "$HASH_NAME"
+
+      # ============================================================
+      # 9. UPLOAD ROOTFS ARTIFACT
+      # ============================================================
+
+      - name: Upload Clean Rootfs Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: kyanite-rootfs-${{ matrix.arch }}
+          path: kyanite-rootfs-${{ matrix.arch }}.tar.xz
+          archive: false
+
+      # ============================================================
+      # 10. UPLOAD SHA256
+      # ============================================================
+
+      - name: Upload SHA256 Checksum Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: kyanite-rootfs-${{ matrix.arch }}-sha256
+          path: kyanite-rootfs-${{ matrix.arch }}.tar.xz.sha256
+          archive: false
+
+      # ============================================================
+      # 11. GITHUB RELEASE
+      # ============================================================
+
+      - name: Release to GitHub
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            kyanite-rootfs-${{ matrix.arch }}.tar.xz
+            kyanite-rootfs-${{ matrix.arch }}.tar.xz.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

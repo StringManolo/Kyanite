@@ -205,6 +205,7 @@ jobs:
           # --------------------------------------------------------
 
           for deb in *.deb; do
+            echo "  $deb -> arch: $(dpkg-deb -f "$deb" Architecture)"
             dpkg-deb -x "$deb" .
           done
 
@@ -259,7 +260,7 @@ jobs:
             # /lib64/ld-linux-x86-64.so.2
 
             ln -sfn \
-              "/lib/$LOADER_NAME" \
+              "../lib/$LOADER_NAME" \
               "../$ARCH_DIR/lib64/$LOADER_NAME"
 
           fi
