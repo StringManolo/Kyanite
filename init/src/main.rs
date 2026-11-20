@@ -1,12 +1,11 @@
 
 use nix::errno::Errno;
-use nix::sys::signal::{kill, Signal};
 use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
 use nix::unistd::{fork, ForkResult, Pid};
 
 use std::io::{self, IsTerminal, Write};
 use std::os::unix::process::CommandExt;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -86,11 +85,6 @@ fn run_noninteractive_test() {
         return;
     }
 
-    // Commands are executed by Brush itself.
-    //
-    // We deliberately do not require an interactive terminal.
-    // stdin is disconnected to verify non-interactive behavior.
-
     let script = r#"
 echo "========== BRUSH NON-INTERACTIVE TEST =========="
 echo "Brush command execution: OK"
@@ -133,7 +127,6 @@ echo "========== NON-INTERACTIVE TEST FINISHED =========="
                 "NON-INTERACTIVE: Brush spawned successfully. PID={}",
                 child.id()
             ));
-
             child
         }
 
@@ -142,7 +135,6 @@ echo "========== NON-INTERACTIVE TEST FINISHED =========="
             log(&format!("Error: {}", error));
             log(&format!("Error kind: {:?}", error.kind()));
             log(&format!("OS error: {:?}", error.raw_os_error()));
-
             return;
         }
     };
@@ -155,15 +147,10 @@ echo "========== NON-INTERACTIVE TEST FINISHED =========="
         match child.try_wait() {
             Ok(Some(status)) => {
                 log("NON-INTERACTIVE: Brush exited naturally.");
-
                 log(&format!("Exit status: {}", status));
 
                 if let Some(code) = status.code() {
                     log(&format!("Exit code: {}", code));
-                }
-
-                if let Some(signal) = status.signal() {
-                    log(&format!("Terminating signal: {}", signal));
                 }
 
                 log(&format!(
@@ -181,16 +168,11 @@ echo "========== NON-INTERACTIVE TEST FINISHED =========="
                     log("Sending SIGKILL to diagnostic Brush process...");
 
                     match child.kill() {
-                        Ok(()) => {
-                            log("SIGKILL sent successfully.");
-                        }
-
-                        Err(error) => {
-                            log(&format!("ERROR sending SIGKILL: {}", error));
-                        }
+                        Ok(()) => log("Kill request sent successfully."),
+                        Err(error) => log(&format!("ERROR killing Brush: {}", error)),
                     }
 
-                    log("Waiting for diagnostic Brush process to be reaped...");
+                    log("Waiting for diagnostic process to terminate...");
 
                     match child.wait() {
                         Ok(status) => {
@@ -201,10 +183,7 @@ echo "========== NON-INTERACTIVE TEST FINISHED =========="
                         }
 
                         Err(error) => {
-                            log(&format!(
-                                "ERROR waiting for diagnostic Brush: {}",
-                                error
-                            ));
+                            log(&format!("ERROR waiting for Brush: {}", error));
                         }
                     }
 
@@ -240,9 +219,7 @@ echo "========== NON-INTERACTIVE TEST FINISHED =========="
     log("NON-INTERACTIVE TEST FINISHED.");
     log("Kyanite init is still running.");
     log("Proceeding to interactive test.");
-
     log("========================================");
-    log("");
 }
 
 // ============================================================
@@ -262,7 +239,6 @@ fn start_interactive_shell() -> Result<Pid, Errno> {
     }
 
     log("Brush executable exists.");
-
     log_stdio("Before fork");
 
     log("Preparing fork()...");
@@ -273,7 +249,6 @@ fn start_interactive_shell() -> Result<Pid, Errno> {
     match unsafe { fork()? } {
         ForkResult::Child => {
             log("========== INTERACTIVE CHILD ==========");
-
             log(&format!("Child PID: {}", std::process::id()));
 
             log_stdio("Interactive child");
@@ -293,14 +268,10 @@ fn start_interactive_shell() -> Result<Pid, Errno> {
                 .arg("-l")
                 .exec();
 
-            // Only reached if exec fails.
-
             log("========== INTERACTIVE EXEC FAILED ==========");
-
             log(&format!("Error: {}", error));
             log(&format!("Error kind: {:?}", error.kind()));
             log(&format!("OS error: {:?}", error.raw_os_error()));
-
             log("=============================================");
 
             std::process::exit(127);
@@ -313,7 +284,6 @@ fn start_interactive_shell() -> Result<Pid, Errno> {
             ));
 
             log("Interactive shell should now be available.");
-
             log("========================================");
 
             Ok(child)
@@ -322,26 +292,34 @@ fn start_interactive_shell() -> Result<Pid, Errno> {
 }
 
 // ============================================================
-// CHILD REAPER
+// REAP OTHER CHILDREN
 // ============================================================
 
-fn reap_other_children() {
+fn reap_other_children(main_shell: Pid) {
     loop {
         match waitpid(None, Some(WaitPidFlag::WNOHANG)) {
             Ok(WaitStatus::StillAlive) => break,
 
             Ok(WaitStatus::Exited(pid, status)) => {
-                log(&format!(
-                    "REAPER: Child PID {} exited with status {}",
-                    pid, status
-                ));
+                if pid == main_shell {
+                    log("WARNING: Main shell was reaped unexpectedly.");
+                } else {
+                    log(&format!(
+                        "REAPER: Child PID {} exited with status {}",
+                        pid, status
+                    ));
+                }
             }
 
             Ok(WaitStatus::Signaled(pid, signal, core_dumped)) => {
-                log(&format!(
-                    "REAPER: Child PID {} killed by {:?}, core_dumped={}",
-                    pid, signal, core_dumped
-                ));
+                if pid == main_shell {
+                    log("WARNING: Main shell was reaped unexpectedly.");
+                } else {
+                    log(&format!(
+                        "REAPER: Child PID {} killed by {:?}, core_dumped={}",
+                        pid, signal, core_dumped
+                    ));
+                }
             }
 
             Ok(WaitStatus::Stopped(pid, signal)) => {
@@ -353,10 +331,7 @@ fn reap_other_children() {
             }
 
             Ok(WaitStatus::Continued(pid)) => {
-                log(&format!(
-                    "REAPER: Child PID {} continued",
-                    pid
-                ));
+                log(&format!("REAPER: Child PID {} continued", pid));
             }
 
             Ok(_) => break,
@@ -383,16 +358,11 @@ fn monitor_shell(shell_pid: Pid) {
     log("========================================");
 
     log(&format!("Monitoring Brush PID: {}", shell_pid));
-
     log_stdio("Supervisor");
 
     let mut last_heartbeat = Instant::now();
 
     loop {
-        // Check the main shell FIRST.
-        // This prevents the generic reaper from consuming
-        // its exit status before we inspect it.
-
         match waitpid(shell_pid, Some(WaitPidFlag::WNOHANG)) {
             Ok(WaitStatus::StillAlive) => {}
 
@@ -403,7 +373,6 @@ fn monitor_shell(shell_pid: Pid) {
                 ));
 
                 log("Kyanite session is shutting down.");
-
                 std::process::exit(status);
             }
 
@@ -414,7 +383,6 @@ fn monitor_shell(shell_pid: Pid) {
                 ));
 
                 log("Kyanite session is shutting down.");
-
                 std::process::exit(128);
             }
 
@@ -424,27 +392,19 @@ fn monitor_shell(shell_pid: Pid) {
 
             Err(Errno::ECHILD) => {
                 log("ERROR: Main shell was already reaped.");
-
                 log("Kyanite session is shutting down.");
-
                 std::process::exit(127);
             }
 
-            Err(Errno::EINTR) => {
-                continue;
-            }
+            Err(Errno::EINTR) => continue,
 
             Err(error) => {
                 log(&format!("waitpid() error: {:?}", error));
             }
         }
 
-        // Reap any other children without losing the main
-        // shell's exit status.
-
-        reap_other_children();
-
-        // Periodic diagnostics.
+        // Reap other children.
+        reap_other_children(shell_pid);
 
         if last_heartbeat.elapsed() >= HEARTBEAT_INTERVAL {
             log(&format!(
@@ -474,17 +434,14 @@ fn main() {
     log(&format!("Init PID: {}", std::process::id()));
 
     log("Stage 1: Inspecting environment.");
-
     log_environment();
 
-    // First test: non-interactive Brush.
-    //
-    // This test runs in a separate child process.
-    // Its termination does NOT terminate Kyanite.
+    // Test 1: non-interactive Brush.
+    // Only the diagnostic child is killed on timeout.
 
     run_noninteractive_test();
 
-    // Second test: interactive Brush.
+    // Test 2: interactive Brush.
 
     log("Stage 2: Starting interactive Brush.");
 
@@ -493,20 +450,15 @@ fn main() {
 
         Err(error) => {
             log(&format!("FATAL: fork() failed: {:?}", error));
-
             std::process::exit(1);
         }
     };
 
     log("Stage 3: Interactive shell spawned.");
-
     log(&format!("Shell PID: {}", shell_pid));
 
     log("Stage 4: Starting supervisor.");
 
     monitor_shell(shell_pid);
 }
-
-// Unix ExitStatusExt for signal diagnostics.
-use std::os::unix::process::ExitStatusExt;
 
