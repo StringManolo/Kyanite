@@ -100,6 +100,24 @@ jobs:
             --root ./brush-install
 
       # ============================================================
+      # 6b. BUILD UUTILS COREUTILS (ls, cat, cp, mv, rm, ... en Rust)
+      # ============================================================
+
+      - name: Build uutils coreutils (Rust)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
+          CARGO_PROFILE_RELEASE_STRIP: "true"
+        run: |
+          # Un solo binario multicall. Para fijar version: --version X.Y.Z
+          cargo install coreutils \
+            --locked \
+            --features feat_os_unix_musl \
+            --target ${{ matrix.rust_target }} \
+            --root ./coreutils-install
+
+      # ============================================================
       # 7. ASSEMBLE ROOTFS
       # ============================================================
 
@@ -142,6 +160,13 @@ jobs:
           install -m 0755 \
             "./brush-install/bin/brush" \
             "$ARCH_DIR/bin/brush"
+
+          # uutils coreutils (Rust): ls, cat, cp, mv, rm, ... como applets de un binario multicall
+          install -m 0755 "./coreutils-install/bin/coreutils" "$ARCH_DIR/usr/bin/coreutils"
+          UUTILS_APPLETS="arch b2sum base32 base64 basename basenc cat chgrp chmod chown cksum comm cp csplit cut date dd df dir dircolors dirname du echo expand expr factor false fmt fold groups head hostname id install join kill link ln logname ls md5sum mkdir mkfifo mknod mktemp mv nice nl nohup nproc numfmt od paste pathchk pr printenv printf ptx pwd readlink realpath rm rmdir seq sha1sum sha224sum sha256sum sha384sum sha512sum shred shuf sleep sort split stat stty sum sync tac tail tee test timeout touch tr true truncate tsort tty uname unexpand uniq unlink vdir wc whoami yes"
+          for applet in $UUTILS_APPLETS; do
+            ln -sfn coreutils "$ARCH_DIR/usr/bin/$applet"
+          done
 
           # --------------------------------------------------------
           # 7.2 Shell entry point
@@ -323,6 +348,10 @@ jobs:
           echo "root:x:0:" > "$ARCH_DIR/etc/group"
 
           chmod 1777 "$ARCH_DIR/tmp"
+
+          # Paquetes que kpkg debe dar por instalados (ya vienen en este rootfs)
+          mkdir -p "$ARCH_DIR/etc/kpkg"
+          printf 'libc6\nlibgcc-s1\ncoreutils\n' > "$ARCH_DIR/etc/kpkg/assume-installed"
 
           # --------------------------------------------------------
           # 7.12 Final rootfs checks

@@ -15,3 +15,6 @@
 ### Stability
 - Test on Qemu
 - Test x86
+- Test on udocker
+- Test on proot distro (pr to termux distros?)
+

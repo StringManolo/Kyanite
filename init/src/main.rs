@@ -17,13 +17,13 @@ const SHELL_PATH: &str = "/bin/brush";
 
 /// true  = al arrancar pregunta que modo de entrada de Brush usar.
 /// false = arranca directo con DEFAULT_MODE (para la version final).
-const BOOT_MENU: bool = true;
+const BOOT_MENU: bool = false;
 
-/// Indice (0-based) en MODES que se usa con Enter / sin menu. 1 = basic.
-const DEFAULT_MODE: usize = 1;
+/// Indice (0-based) en MODES que se usa con Enter / sin menu. 0 = reedline.
+const DEFAULT_MODE: usize = 0;
 
 /// Latidos de diagnostico (uno cada 5 s) tras lanzar el shell. 0 = ninguno.
-const HEARTBEATS_MAX: u32 = 6;
+const HEARTBEATS_MAX: u32 = 0;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const LOOP_INTERVAL: Duration = Duration::from_millis(100);
 const TEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -34,6 +34,9 @@ const MAX_ATTEMPTS: u32 = 10;
 
 /// Ticks de CPU (1 tick = 10 ms) en un latido a partir de los cuales se considera bucle activo.
 const BUSY_TICKS: u64 = 50;
+
+/// true = banner, entorno, version de brush, TEST 1 y trazas de arranque.
+const DEBUG_BOOT: bool = false;
 
 struct Mode {
     name: &'static str,
@@ -60,6 +63,12 @@ fn log(message: &str) {
     let mut err = io::stderr().lock();
     let _ = write!(err, "[init] {}\r\n", message);
     let _ = err.flush();
+}
+
+fn debug(message: &str) {
+    if DEBUG_BOOT {
+        log(message);
+    }
 }
 
 fn log_stdio(context: &str) {
@@ -268,7 +277,7 @@ fn child_job_control() {
         if libc::tcsetpgrp(0, pid) != 0 {
             log(&format!("tcsetpgrp(0, {}) FALLO: {}", pid, io::Error::last_os_error()));
         } else {
-            log(&format!("tcsetpgrp(0, {}) OK: el shell es el grupo en primer plano", pid));
+            debug(&format!("tcsetpgrp(0, {}) OK: el shell es el grupo en primer plano", pid));
         }
 
         // El shell recibe las senales de job control con la accion por defecto.
@@ -369,7 +378,7 @@ enum Outcome {
 }
 
 fn supervise(shell: Pid) -> Outcome {
-    log("--- SUPERVISOR ---");
+    debug("--- SUPERVISOR ---");
 
     let mut last_beat = Instant::now();
     let mut beats = 0u32;
@@ -430,16 +439,20 @@ fn supervise(shell: Pid) -> Outcome {
 // ============================================================
 
 fn main() {
-    log("");
-    log("========================================");
-    log("          KYANITE INIT");
-    log("========================================");
-    log(&format!("Init PID: {}", std::process::id()));
+    debug("");
+    debug("========================================");
+    debug("          KYANITE INIT");
+    debug("========================================");
+    debug(&format!("Init PID: {}", std::process::id()));
     ignore_sigttou();
 
-    log_environment();
-    let help = log_brush_info();
-    run_noninteractive_test();
+    if DEBUG_BOOT {
+        log_environment();
+    }
+    let help = if DEBUG_BOOT { log_brush_info() } else { String::new() };
+    if DEBUG_BOOT {
+        run_noninteractive_test();
+    }
 
     let mut attempts = 0u32;
     loop {
@@ -447,8 +460,10 @@ fn main() {
 
         let index = choose_mode(&help);
         let mode = &MODES[index];
-        log(&format!("lanzando [{}]: {} {}", mode.name, SHELL_PATH, mode.args.join(" ")));
-        log_stdio("antes del fork");
+        debug(&format!("lanzando [{}]: {} {}", mode.name, SHELL_PATH, mode.args.join(" ")));
+        if DEBUG_BOOT {
+            log_stdio("antes del fork");
+        }
 
         let started = Instant::now();
         let shell = match start_shell(mode.args) {
@@ -458,7 +473,7 @@ fn main() {
                 std::process::exit(1);
             }
         };
-        log(&format!("shell lanzado, PID={}", shell));
+        debug(&format!("shell lanzado, PID={}", shell));
 
         let code = match supervise(shell) {
             Outcome::Exited(code) => {
