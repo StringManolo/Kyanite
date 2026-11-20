@@ -1,0 +1,13 @@
+#!/bin/brush
+# /etc/update-motd.d/00-logo - prints /etc/kyanite/logo.txt.
+# The logo is pre-coloured with 256-colour escapes, so it is skipped on
+# terminals without colour support. Replace logo.txt freely (e.g. with chafa
+# output); keep it under ~40 columns so it fits narrow phone screens.
+. /etc/kyanite/colors.sh
+
+[ "$C_256" = 1 ] || exit 0
+[ -r /etc/kyanite/logo.txt ] || exit 0
+
+printf '\n'
+cat /etc/kyanite/logo.txt
+printf '\n'

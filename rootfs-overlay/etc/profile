@@ -1,0 +1,41 @@
+# /etc/profile - Kyanite system-wide login shell setup.
+#
+# kyanite-init starts Brush as a login shell (-i -l), so this file is read on
+# every session. It prints the MOTD and loads ~/.bashrc.
+
+# Default PATH, only if the launcher did not provide one.
+if [ -z "${PATH:-}" ]; then
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+fi
+export PATH
+
+# MOTD: every executable script in /etc/update-motd.d/ (in name order), then
+# the static /etc/motd. Scripts are run with /bin/brush on purpose: /bin/sh is
+# kyanite-init, so a "#!/bin/sh" shebang would not work here.
+# To disable a script: chmod -x it. To silence everything: touch ~/.hushlogin
+kyanite_motd() {
+  for _motd_script in /etc/update-motd.d/*; do
+    if [ -f "$_motd_script" ] && [ -x "$_motd_script" ]; then
+      /bin/brush "$_motd_script"
+    fi
+  done
+  unset _motd_script
+  if [ -r /etc/motd ]; then
+    cat /etc/motd
+  fi
+}
+
+case "$-" in
+  *i*)
+    if [ ! -e "$HOME/.hushlogin" ]; then
+      kyanite_motd
+    fi
+
+    # Login shells do not read ~/.bashrc by themselves.
+    if [ -r "$HOME/.bashrc" ]; then
+      . "$HOME/.bashrc"
+    fi
+    ;;
+esac
+
+unset -f kyanite_motd

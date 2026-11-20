@@ -1,0 +1,12 @@
+#!/bin/brush
+# /etc/update-motd.d/90-hints - quick-start hints.
+. /etc/kyanite/colors.sh
+
+hint() {
+  printf '  %s%-9s%s %s\n' "$C_DIM" "$1" "$C_RESET" "$2"
+}
+
+hint "Packages" "kpkg update && kpkg add <package>"
+hint "Editor" "vi"
+hint "Project" "https://github.com/StringManolo/Kyanite"
+printf '\n  %sEdit /etc/update-motd.d/ or /etc/motd to customize. Silence with: touch ~/.hushlogin%s\n\n' "$C_DIM" "$C_RESET"

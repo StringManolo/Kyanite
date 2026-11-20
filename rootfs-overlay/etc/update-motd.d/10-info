@@ -1,0 +1,55 @@
+#!/bin/brush
+# /etc/update-motd.d/10-info - system summary, computed at every login.
+. /etc/kyanite/colors.sh
+[ -r /etc/os-release ] && . /etc/os-release
+
+row() {
+  printf '  %s%-9s%s %s\n' "$C_DIM" "$1" "$C_RESET" "$2"
+}
+
+# Header: name, version and architecture
+printf '  %s%s%s%s' "$C_BOLD" "$C_LIGHT" "${PRETTY_NAME:-Kyanite}" "$C_RESET"
+arch=$(uname -m 2>/dev/null)
+[ -n "$arch" ] && printf ' %s(%s)%s' "$C_DIM" "$arch" "$C_RESET"
+printf '\n\n'
+
+# Kernel
+kernel=$(uname -sr 2>/dev/null)
+[ -n "$kernel" ] && row "Kernel" "$kernel"
+
+# Uptime
+if [ -r /proc/uptime ]; then
+  read -r up _ < /proc/uptime
+  up=${up%%.*}
+  if [ -n "$up" ]; then
+    d=$((up / 86400))
+    h=$((up % 86400 / 3600))
+    m=$((up % 3600 / 60))
+    days=
+    [ "$d" -gt 0 ] && days="${d}d "
+    row "Uptime" "${days}${h}h ${m}m"
+  fi
+fi
+
+# Memory
+if [ -r /proc/meminfo ]; then
+  mem_total= mem_avail=
+  while read -r key val _; do
+    case "$key" in
+      MemTotal:)     mem_total=$val ;;
+      MemAvailable:) mem_avail=$val ;;
+    esac
+  done < /proc/meminfo
+  if [ -n "$mem_total" ] && [ -n "$mem_avail" ]; then
+    row "Memory" "$(( (mem_total - mem_avail) / 1024 )) MiB / $(( mem_total / 1024 )) MiB"
+  fi
+fi
+
+# Disk (root filesystem): Filesystem Size Used Avail Use% Mounted-on
+dfline=$(df -h / 2>/dev/null | tail -n 1)
+if [ -n "$dfline" ]; then
+  set -- $dfline
+  [ $# -ge 5 ] && row "Disk" "$3 used of $2 ($5)"
+fi
+
+printf '\n'

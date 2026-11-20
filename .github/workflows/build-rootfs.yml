@@ -32,6 +32,20 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Full history + tags, needed by "git describe" below.
+          fetch-depth: 0
+
+      # ============================================================
+      # 1b. VERSION
+      # ============================================================
+
+      - name: Compute Kyanite version
+        run: |
+          # On a tag:           v0.1.0
+          # N commits after it: v0.1.0-3-g1a2b3c4
+          # No tag yet:         1a2b3c4 (commit hash)
+          echo "KYANITE_VERSION=$(git describe --tags --always)" >> "$GITHUB_ENV"
 
       # ============================================================
       # 2. RUST TOOLCHAIN
@@ -203,10 +217,10 @@ jobs:
           esac
 
           # --------------------------------------------------------
-          # 7.4 Download glibc runtime
+          # 7.4 Download glibc runtime + vi (vim-tiny)
           # --------------------------------------------------------
 
-          echo "Downloading glibc runtime ($DEBIAN_ARCH)..."
+          echo "Downloading glibc runtime and vi ($DEBIAN_ARCH)..."
 
           if [ "$DEBIAN_ARCH" = "arm64" ]; then
             sudo dpkg --add-architecture arm64
@@ -218,11 +232,23 @@ jobs:
 
           if [ "$DEBIAN_ARCH" = "amd64" ]; then
             apt-get download libc6 libgcc-s1
+            apt-get download \
+              vim-tiny vim-common \
+              libacl1 libselinux1 libpcre2-8-0 libtinfo6 \
+              ncurses-base
           else
             apt-get download \
               libc6:arm64 \
               libgcc-s1:arm64 \
               gnu-coreutils:arm64
+            apt-get download \
+              vim-tiny:arm64 \
+              libacl1:arm64 libselinux1:arm64 libpcre2-8-0:arm64 libtinfo6:arm64
+            # Architecture-independent packages: try the :arm64 form first,
+            # fall back to the plain name.
+            for pkg in vim-common ncurses-base; do
+              apt-get download "$pkg:arm64" || apt-get download "$pkg"
+            done
           fi
 
           # --------------------------------------------------------
@@ -246,6 +272,39 @@ jobs:
 
           if [ -d "usr/lib/$LIB_PREFIX" ]; then
             cp -a "usr/lib/$LIB_PREFIX/." "../$ARCH_DIR/usr/lib/"
+          fi
+
+          # --------------------------------------------------------
+          # 7.6b Install vi (vim-tiny) and the terminfo database
+          # --------------------------------------------------------
+
+          echo "Installing vi (vim-tiny)..."
+
+          if [ ! -f usr/bin/vim.tiny ]; then
+            echo "ERROR: usr/bin/vim.tiny not found in vim-tiny"
+            exit 1
+          fi
+
+          install -D -m 0755 usr/bin/vim.tiny "../$ARCH_DIR/usr/bin/vim.tiny"
+
+          # Debian creates these through update-alternatives (a maintainer
+          # script, which is never run here), so link them by hand.
+          for name in vi vim ex view; do
+            ln -sfn vim.tiny "../$ARCH_DIR/usr/bin/$name"
+          done
+
+          # Vim config/runtime files and the terminfo database (vim does not
+          # start without a terminfo entry for $TERM).
+          for dir in etc/vim usr/share/vim lib/terminfo usr/share/terminfo etc/terminfo; do
+            if [ -d "$dir" ]; then
+              mkdir -p "../$ARCH_DIR/$(dirname "$dir")"
+              cp -a "$dir" "../$ARCH_DIR/$(dirname "$dir")/"
+            fi
+          done
+
+          if [ ! -d "../$ARCH_DIR/lib/terminfo" ] && [ ! -d "../$ARCH_DIR/usr/share/terminfo" ]; then
+            echo "ERROR: terminfo database not found (ncurses-base)"
+            exit 1
           fi
 
           # --------------------------------------------------------
@@ -351,7 +410,35 @@ jobs:
 
           # Paquetes que kpkg debe dar por instalados (ya vienen en este rootfs)
           mkdir -p "$ARCH_DIR/etc/kpkg"
-          printf 'libc6\nlibgcc-s1\ncoreutils\n' > "$ARCH_DIR/etc/kpkg/assume-installed"
+          printf '%s\n' \
+            libc6 libgcc-s1 coreutils \
+            vim-tiny vim-common libacl1 libselinux1 libpcre2-8-0 libtinfo6 ncurses-base \
+            > "$ARCH_DIR/etc/kpkg/assume-installed"
+
+          # --------------------------------------------------------
+          # 7.11b Overlay: /etc/profile, MOTD, ~/.bashrc, ...
+          # --------------------------------------------------------
+
+          echo "Applying rootfs-overlay..."
+
+          cp -a rootfs-overlay/. "$ARCH_DIR/"
+
+          # Git does not guarantee modes on every checkout: enforce them.
+          find "$ARCH_DIR/etc/update-motd.d" -type f -exec chmod 0755 {} +
+          find "$ARCH_DIR/etc/kyanite" -type f -exec chmod 0644 {} +
+          chmod 0644 "$ARCH_DIR/etc/profile" "$ARCH_DIR/root/.bashrc"
+
+          # /etc/os-release: identifies the build (used by the MOTD)
+          {
+            echo 'NAME="Kyanite"'
+            echo 'ID=kyanite'
+            echo "VERSION=\"$KYANITE_VERSION\""
+            echo "VERSION_ID=\"${KYANITE_VERSION#v}\""
+            echo "PRETTY_NAME=\"Kyanite $KYANITE_VERSION\""
+            echo "BUILD_ID=\"${GITHUB_SHA::7}\""
+            echo 'HOME_URL="https://github.com/StringManolo/Kyanite"'
+            echo 'BUG_REPORT_URL="https://github.com/StringManolo/Kyanite/issues"'
+          } > "$ARCH_DIR/etc/os-release"
 
           # --------------------------------------------------------
           # 7.12 Final rootfs checks
@@ -364,14 +451,17 @@ jobs:
           ls -l "$ARCH_DIR/bin/brush"
           ls -l "$ARCH_DIR/bin/sh"
           ls -l "$ARCH_DIR/usr/bin/env"
+          ls -l "$ARCH_DIR/usr/bin/vi"
           ls -l "$ARCH_DIR/lib/$LOADER_NAME"
+          ls -l "$ARCH_DIR/etc/profile" "$ARCH_DIR/root/.bashrc" "$ARCH_DIR/etc/os-release"
+          ls -l "$ARCH_DIR/etc/update-motd.d/"
 
           if [ "$DEBIAN_ARCH" = "amd64" ]; then
             ls -l "$ARCH_DIR/lib64/$LOADER_NAME"
           fi
 
           echo ""
-          echo "Kyanite rootfs assembled successfully."
+          echo "Kyanite $KYANITE_VERSION rootfs assembled successfully."
 
       # ============================================================
       # 8. COMPRESS ROOTFS AND GENERATE SHA256
@@ -428,4 +518,3 @@ jobs:
             kyanite-rootfs-${{ matrix.arch }}.tar.xz.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
