@@ -2,6 +2,8 @@
 
 Kyanite is a minimal Linux root filesystem, in the same category as the Alpine Linux rootfs, built around memory-safe Rust components instead of BusyBox and a C userland. It is designed to be small, secure and comfortable to use, and it is intended to grow into a complete distribution (kernel included).
 
+![Kyanite login screen](docs/screenshot.png)
+
 [![Build Kyanite Rootfs](https://github.com/StringManolo/Kyanite/actions/workflows/build-rootfs.yml/badge.svg)](https://github.com/StringManolo/Kyanite/actions/workflows/build-rootfs.yml)
 
 > **Status:** stable enough for daily experimentation, not yet feature-complete. See [Known limitations](#known-limitations) and [Roadmap](#roadmap).
