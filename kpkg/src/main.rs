@@ -883,6 +883,9 @@ fn load_keyring(ctx: &Ctx) -> Res<Vec<SignedPublicKey>> {
         }
     }
     let mut keys: Vec<SignedPublicKey> = Vec::new();
+    if env::var("KPKG_DEBUG").is_ok() {
+        println!("[debug] keyring files: {:?}", paths);
+    }
     for p in &paths {
         let data = match fs::read(p) {
             Ok(d) => d,
@@ -895,8 +898,13 @@ fn load_keyring(ctx: &Ctx) -> Res<Vec<SignedPublicKey>> {
             }
         } else {
             for k in SignedPublicKey::from_bytes_many(io::Cursor::new(data)) {
-                if let Ok(k) = k {
-                    keys.push(k);
+                match k {
+                    Ok(k) => keys.push(k),
+                    Err(e) => {
+                        if env::var("KPKG_DEBUG").is_ok() {
+                            println!("[debug] keyring {}: key rejected by the parser: {}", p.display(), e);
+                        }
+                    }
                 }
             }
         }
@@ -915,9 +923,17 @@ Refusing to use unsigned repositories."
 fn verify_inrelease(clearsigned: &str, keys: &[SignedPublicKey]) -> Res<String> {
     let (msg, _headers) = CleartextSignedMessage::from_string(clearsigned)
         .map_err(|e| format!("InRelease is not a valid clearsigned message: {}", e))?;
+    let mut reasons: HashMap<String, usize> = HashMap::new();
     for k in keys {
-        if msg.verify(&k.primary_key).is_ok() {
-            return Ok(msg.signed_text().replace("\r\n", "\n"));
+        match msg.verify(&k.primary_key) {
+            Ok(_) => return Ok(msg.signed_text().replace("\r\n", "\n")),
+            Err(e) => *reasons.entry(e.to_string()).or_insert(0) += 1,
+        }
+    }
+    if env::var("KPKG_DEBUG").is_ok() {
+        println!("[debug] {} key(s) tried, none verified. Reasons:", keys.len());
+        for (r, n) in &reasons {
+            println!("[debug]   {} x {}", n, r);
         }
     }
     Err("SECURITY ALERT: the OpenPGP signature of InRelease is invalid or was made by an untrusted key. \

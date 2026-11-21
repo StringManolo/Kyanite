@@ -68,8 +68,6 @@ alias quit='exit'
 alias q='exit'
 alias apk='kpkg'
 alias kpk='kpkg'
-alias apt='kpkg'
-alias apt-get='kpkg'
 alias sb='source ~/.bashrc'
 alias update='kpkg update && kpkg upgrade'
 
