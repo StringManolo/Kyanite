@@ -1033,10 +1033,11 @@ fn sig_issuers(b: &[u8], hashed_end: usize, ul: usize) -> Vec<String> {
     out
 }
 
-/// Claves publicas RSA v4 (paquetes primarios, tag 6) de un keyring binario.
+/// Claves publicas RSA v4 de un keyring binario: primarias (tag 6) Y subclaves (tag 14).
+/// Las claves de firma de los archivos 12/bookworm y 13/trixie de Debian son subclaves.
 fn rsa_keys_from_packets(data: &[u8], keys: &mut Vec<RsaPublicKey>) {
     for (tag, b) in pgp_packets(data) {
-        if tag != 6 || b.len() < 8 || b[0] != 4 || b[5] != 1 {
+        if (tag != 6 && tag != 14) || b.len() < 8 || b[0] != 4 || b[5] != 1 {
             continue;
         }
         if let Some((n, i)) = pgp_mpi(b, 6) {
