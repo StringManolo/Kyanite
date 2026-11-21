@@ -142,9 +142,27 @@ jobs:
           # La imagen oficial debian:stable-slim trae el keyring vigente de "stable"
           # (el de Ubuntu no sirve: puede no incluir la clave de la suite actual).
           cid="$(docker create debian:stable-slim)"
-          docker cp "$cid:/usr/share/keyrings/debian-archive-keyring.gpg" keyring/debian-archive-keyring.gpg
+          mkdir -p kr-src
+          # Segun la release de Debian las claves estan como .gpg, .pgp o .asc, en uno u otro sitio.
+          docker cp "$cid:/usr/share/keyrings/." kr-src/ || true
+          docker cp "$cid:/etc/apt/trusted.gpg.d/." kr-src/ || true
           docker rm "$cid" > /dev/null
-          test -s keyring/debian-archive-keyring.gpg
+          echo "Keyring candidates found in the image:"
+          ls -l kr-src || true
+          # Se normaliza todo a UN keyring binario (lo que leen kpkg y gpgv).
+          export GNUPGHOME="$(mktemp -d)"
+          chmod 700 "$GNUPGHOME"
+          N=0
+          for f in kr-src/debian-archive-*; do
+            [ -f "$f" ] || continue
+            if gpg --batch --quiet --import "$f"; then N=$((N+1)); fi
+          done
+          echo "Imported $N keyring file(s)"
+          gpg --batch --export > keyring/debian-archive-keyring.gpg
+          if [ ! -s keyring/debian-archive-keyring.gpg ]; then
+            echo "::error::no Debian archive keys found in debian:stable-slim"
+            exit 1
+          fi
           # Autotest: debe verificar HOY el InRelease de stable y el de su suite de seguridad.
           curl -fsSL https://deb.debian.org/debian/dists/stable/InRelease -o InRelease.main
           gpgv --keyring ./keyring/debian-archive-keyring.gpg InRelease.main
