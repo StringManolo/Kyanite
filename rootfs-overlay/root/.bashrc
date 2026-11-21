@@ -50,9 +50,9 @@ alias l='ls'
 alias la='ls -a'
 alias ll='ls -lh'
 alias v='vim'
-alias clear="printf '\033c'"
-alias c="printf '\033c'"
-alias cl="printf '\033c' && ls"
+clear() { printf '\033c'; }
+c()     { printf '\033c'; }
+cl()    { printf '\033c'; ls; }
 alias ..='cd ..'
 alias ...='cd ../..'
 alias ....='cd ../../..'

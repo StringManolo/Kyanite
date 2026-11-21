@@ -42,6 +42,7 @@ root@kyanite:~#
 - Add opengpg check of signatures pre https
 - PRIORITY Add autopdate from nightly realeases created from github actions (only when a core component updates) (check how to automatize to rebuild on security related updates of any of the sofware) (download the tarball, readchangelogs or missmatched sha, and replace)
 - Balance between using musl static vs glib dinamic for shiped bins
+- Check for new features
 
 ### Quality Of Life
 - Add better logs to init
@@ -53,11 +54,12 @@ root@kyanite:~#
 - Ship as own APK for Android with DebianLiveCD4Android as base APK.
 - Add proot-distro install script in the repo
 - Add screenshot (generate from logo.txt, try chafta)
-- Missing basics: find
+- Missing basics: find, grep
 - Recycle bin
 - CloudBackups
 - Swap Kernel + Check Rufus installs
 - Patch apps that work but they think they don't like nmap
+- Include support for X11?
 
 ### Stability
 - Test on Qemu
