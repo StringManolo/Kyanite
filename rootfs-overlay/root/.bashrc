@@ -13,6 +13,9 @@ esac
 export EDITOR=vi
 export VISUAL=vi
 
+# Keep $COLUMNS/$LINES correct when the window is resized.
+shopt -s checkwinsize 2>/dev/null
+
 # ------------------------------------------------------------
 # History (unlimited)
 # ------------------------------------------------------------
@@ -20,27 +23,79 @@ HISTFILE="$HOME/.bash_history"
 HISTSIZE=1000000000
 HISTFILESIZE=1000000000
 shopt -s histappend 2>/dev/null
-# Write each command right away: sessions are often killed without a clean exit.
-PROMPT_COMMAND='history -a 2>/dev/null'
 
 # ------------------------------------------------------------
-# Prompt: user@host:/path#   (host comes from /etc/hostname)
+# Colours (logo palette, see /etc/kyanite/colors.sh)
 # ------------------------------------------------------------
-_host=
-[ -r /etc/hostname ] && read -r _host < /etc/hostname
-: "${_host:=kyanite}"
+[ -r /etc/kyanite/colors.sh ] && . /etc/kyanite/colors.sh
 
-if [ -z "${NO_COLOR:-}" ] && [ -n "${TERM:-}" ] && [ "$TERM" != dumb ]; then
-  case "$TERM" in
-    *256color*|*truecolor*|*direct*) _c_user='38;5;75'; _c_path='38;5;33' ;;
-    *)                               _c_user='36';      _c_path='34' ;;
-  esac
-  PS1='\[\033[1;'"$_c_user"'m\]\u@'"$_host"'\[\033[0m\]:\[\033[1;'"$_c_path"'m\]\w\[\033[0m\]\$ '
-  unset _c_user _c_path
-else
-  PS1='\u@'"$_host"':\w\$ '
+# ------------------------------------------------------------
+# Prompt:  (blank line)
+#          [rc] user@host:/path (branch) $
+#   - [rc]     only shown, in red, when the last command failed
+#   - (branch) git branch or short hash, read from .git/HEAD in pure shell
+#              (no fork: forks are slow under proot)
+#   - the $/# symbol is blue, or red after a failed command
+# The prompt is rebuilt before every prompt by PROMPT_COMMAND. Sessions are
+# often killed without a clean exit, so history is also written right away.
+# ------------------------------------------------------------
+_kx_host=
+[ -r /etc/hostname ] && read -r _kx_host < /etc/hostname
+: "${_kx_host:=kyanite}"
+
+# Long paths wrap on phone screens: keep only the last 3 components.
+PROMPT_DIRTRIM=3
+
+# Sets _kx_br to the current git branch (or short hash); empty outside a repo.
+_kx_branch() {
+  local d=$PWD head
+  _kx_br=
+  while [ -n "$d" ]; do
+    if [ -d "$d/.git" ]; then
+      read -r head < "$d/.git/HEAD" 2>/dev/null || return 0
+      case "$head" in
+        'ref: refs/heads/'*) _kx_br=${head#ref: refs/heads/} ;;
+        *)                   _kx_br=${head:0:7} ;;
+      esac
+      return 0
+    fi
+    d=${d%/*}
+  done
+}
+
+_kx_prompt() {
+  local rc=$? sym=$C_BLUE
+  history -a 2>/dev/null
+  PS1='\n'   # blank line before every prompt
+  if [ "$rc" -ne 0 ]; then
+    PS1="${PS1}\\[${C_RED}\\][${rc}]\\[${C_RESET}\\] "
+    sym=$C_RED
+  fi
+  PS1="${PS1}\\[${C_BOLD}${C_LIGHT}\\]\\u@${_kx_host}\\[${C_RESET}\\]:\\[${C_BOLD}${C_BLUE}\\]\\w\\[${C_RESET}\\]"
+  _kx_branch
+  [ -n "$_kx_br" ] && PS1="${PS1} \\[${C_DIM}\\](${_kx_br})\\[${C_RESET}\\]"
+  PS1="${PS1} \\[${sym}\\]\\\$\\[${C_RESET}\\] "
+}
+PROMPT_COMMAND=_kx_prompt
+
+# ------------------------------------------------------------
+# Colours for ls, less and man (directories in the light logo blue;
+# the default dark blue is hard to read on dark backgrounds)
+# ------------------------------------------------------------
+if [ "$C_256" = 1 ]; then
+  if [ "$C_TRUE" = 1 ]; then
+    _b='38;2;83;185;251' _c='38;2;135;215;255' _g='38;2;143;207;154' _r='38;2;230;122;120'
+  else
+    _b='38;5;75' _c='38;5;117' _g='38;5;114' _r='38;5;210'
+  fi
+  export LS_COLORS="di=1;$_b:ln=$_c:ex=$_g:or=$_r:mi=$_r:ow=1;4;$_b:tw=1;4;$_b:st=1;4;$_b"
+  export LESS_TERMCAP_md=$'\033[1;'"$_b"'m'   # bold  (man headings)
+  export LESS_TERMCAP_us=$'\033[4;'"$_c"'m'   # underline (man arguments)
+  export LESS_TERMCAP_me=$'\033[0m'
+  export LESS_TERMCAP_ue=$'\033[0m'
+  unset _b _c _g _r
 fi
-unset _host
+export LESS=-R
 
 # ------------------------------------------------------------
 # Aliases
@@ -49,6 +104,7 @@ alias ls='ls --color=auto'
 alias l='ls'
 alias la='ls -a'
 alias ll='ls -lh'
+alias grep='grep --color=auto'
 alias v='vim'
 clear() { printf '\033c'; }
 c()     { printf '\033c'; }
@@ -59,7 +115,7 @@ alias ....='cd ../../..'
 alias .....='cd ../../../..'
 alias pserv='python3 -m http.server'
 alias gitc='git clone'
-alias 775='chmod +775'
+alias 775='chmod 775'
 alias folder='du -h --max-depth=1'
 alias h='history'
 alias irc='weechat'
@@ -68,12 +124,19 @@ alias quit='exit'
 alias q='exit'
 alias apk='kpkg'
 alias kpk='kpkg'
-alias sb='source ~/.bashrc'
+alias pkg='kpkg'
+alias kp='kpkg'
+alias sb='. ~/.bashrc'
 alias update='kpkg update && kpkg upgrade'
 
 # ------------------------------------------------------------
 # Functions
 # ------------------------------------------------------------
+
+# mkdir + cd:  mkcd path/to/dir
+mkcd() {
+  mkdir -p -- "$1" && cd -- "$1"
+}
 
 # git add + commit + push:  gacp "commit message"
 gacp() {
