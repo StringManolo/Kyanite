@@ -41,6 +41,12 @@ Kyanite uses **musl only for the preinstalled components** (init, package manage
 
 Release archives are published on the [Releases page](https://github.com/StringManolo/Kyanite/releases) for every `vX.Y.Z` tag. Each release contains, per architecture:
 
+### Android
+
+Kyanite is also available as an Android application, providing a complete Linux environment with an integrated terminal and additional system management features.
+
+[**Download Kyanite for Android (.apk)**](https://github.com/StringManolo/KyaniteAndroid/releases/latest/download/Kyanite.apk) · [Source code and documentation](https://github.com/StringManolo/KyaniteAndroid)
+
 - `kyanite-rootfs-<arch>.tar.xz`
 - `kyanite-rootfs-<arch>.tar.xz.sha256`
 - `kyanite-rootfs-<arch>.tar.xz.sha256.sig` (Ed25519 signature of the `.sha256` file)
