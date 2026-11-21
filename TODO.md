@@ -54,7 +54,7 @@ root@kyanite:~#
 - ~~Ship as own APK for Android with DebianLiveCD4Android as base APK.~~
 - Add proot-distro install script in the repo
 - ~~Add screenshot (generate from logo.txt,~~ try chafta)
-- Missing basics: find, grep
+- Missing basics: find, grep, which
 - Recycle bin
 - CloudBackups
 - Swap Kernel + Check Rufus installs

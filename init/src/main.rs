@@ -3,6 +3,7 @@ use nix::libc;
 use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
 use nix::unistd::{fork, ForkResult, Pid};
 
+use std::ffi::OsString;
 use std::io::{self, IsTerminal, Read, Write};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
@@ -435,10 +436,70 @@ fn supervise(shell: Pid) -> Outcome {
 }
 
 // ============================================================
+// MODO "sh" NO INTERACTIVO (paso directo a Brush)
+// ============================================================
+// /bin/sh es un enlace a este binario. Programas como git, make, python (subprocess), xargs o
+// cron ejecutan `/bin/sh -c "<comando>"` o `/bin/sh script`, o le pasan los comandos por stdin.
+// Eso NO debe abrir una sesion de login: debe ejecutar el comando y devolver su codigo de salida.
+// Aqui se decide, a partir de los argumentos, si hay que hacer `exec` directo de Brush con los
+// mismos argumentos. La sesion (grupo de procesos, tty, supervisor) queda para el arranque real
+// (PID 1) y para el uso interactivo: `sh`, `sh -l`, `sh -il`.
+
+/// true = no hay que montar sesion: exec directo de Brush con los argumentos recibidos.
+fn wants_passthrough(args: &[String], is_pid1: bool, stdin_is_tty: bool) -> bool {
+    if is_pid1 {
+        return false;
+    }
+    let mut interactive = false;
+    for a in args {
+        if a == "--" || a == "-" {
+            return true; // lo que sigue es script / argumentos; "-" = script por stdin
+        }
+        if a.starts_with("--") {
+            if a == "--login" || a == "--interactive" {
+                interactive = true;
+            }
+            continue;
+        }
+        if a.starts_with('-') && a.len() > 1 {
+            let flags = &a[1..];
+            if flags.contains('c') || flags.contains('s') {
+                return true; // -c <comando>  /  -s (leer comandos de stdin)
+            }
+            if flags.contains('i') || flags.contains('l') {
+                interactive = true;
+            }
+            continue;
+        }
+        return true; // primer argumento que no es opcion: ruta de un script
+    }
+    if interactive {
+        return false;
+    }
+    !stdin_is_tty // `echo cmd | sh`
+}
+
+/// Sustituye este proceso por Brush con los mismos argumentos. No vuelve.
+/// Debe llamarse ANTES de ignore_sigttou(): una senal ignorada se hereda tras exec.
+fn exec_passthrough(args: &[String]) -> ! {
+    let error = Command::new(SHELL_PATH).args(args).exec();
+    eprintln!("sh: no se pudo ejecutar {}: {}", SHELL_PATH, error);
+    std::process::exit(127);
+}
+
+// ============================================================
 // MAIN
 // ============================================================
 
 fn main() {
+    let args: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|a: OsString| a.to_string_lossy().into_owned())
+        .collect();
+    if wants_passthrough(&args, std::process::id() == 1, io::stdin().is_terminal()) {
+        exec_passthrough(&args);
+    }
+
     debug("");
     debug("========================================");
     debug("          KYANITE INIT");
@@ -501,5 +562,47 @@ fn main() {
         }
 
         log("el shell fallo; vuelvo al menu para probar otro modo.");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wants_passthrough;
+
+    fn v(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn command_and_script_pass_through() {
+        assert!(wants_passthrough(&v(&["-c", "echo hola"]), false, true));
+        assert!(wants_passthrough(&v(&["-c", "echo hola"]), false, false));
+        assert!(wants_passthrough(&v(&["-ec", "exit 7"]), false, true));
+        assert!(wants_passthrough(&v(&["script.sh", "a"]), false, true));
+        assert!(wants_passthrough(&v(&["-e", "script.sh"]), false, true));
+        assert!(wants_passthrough(&v(&["-s"]), false, true));
+        assert!(wants_passthrough(&v(&["-"]), false, true));
+        assert!(wants_passthrough(&v(&["--"]), false, true));
+    }
+
+    #[test]
+    fn stdin_pipe_passes_through() {
+        assert!(wants_passthrough(&v(&[]), false, false));
+    }
+
+    #[test]
+    fn interactive_sessions_are_kept() {
+        assert!(!wants_passthrough(&v(&[]), false, true));
+        assert!(!wants_passthrough(&v(&["-l"]), false, true));
+        assert!(!wants_passthrough(&v(&["-il"]), false, true));
+        assert!(!wants_passthrough(&v(&["-l"]), false, false));
+        assert!(!wants_passthrough(&v(&["--login"]), false, true));
+    }
+
+    #[test]
+    fn pid1_never_passes_through() {
+        assert!(!wants_passthrough(&v(&["-l"]), true, true));
+        assert!(!wants_passthrough(&v(&[]), true, false));
+        assert!(!wants_passthrough(&v(&["-c", "x"]), true, false));
     }
 }
