@@ -17,13 +17,13 @@ use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use flate2::read::GzDecoder;
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, Sha384, Sha512};
 use tar::EntryType;
 use xz2::read::XzDecoder;
 
 use ed25519_dalek::{Signature, VerifyingKey};
-use pgp::composed::cleartext::CleartextSignedMessage;
-use pgp::composed::{Deserializable, SignedPublicKey};
+use rsa::traits::PublicKeyParts;
+use rsa::{BigUint, Pkcs1v15Sign, RsaPublicKey};
 
 type Res<T> = Result<T, Box<dyn Error>>;
 
@@ -857,15 +857,152 @@ fn parse_release_hashes(text: &str) -> HashMap<String, (String, u64)> {
     m
 }
 
-// ---- Firma OpenPGP -------------------------------------------------------
+// ---- Firma OpenPGP (verificador minimo) ---------------------------------------------------
 // Cadena de confianza: keyring de Debian (en el rootfs) -> InRelease firmado -> SHA256 de
 // Packages.xz -> SHA256 de cada .deb. Si la firma no verifica, NO se usa nada del mirror.
+//
+// Verificador propio y deliberadamente pequeno: solo claves publicas RSA v4 y firmas v4 RSA de
+// texto (tipo 0x01) con SHA-256/384/512, que es lo que Debian usa en InRelease. La operacion
+// criptografica (RSA PKCS#1 v1.5) la hace el crate `rsa`; aqui solo se parsean paquetes.
+// (Se descarto el crate `pgp`: descartaba en silencio las claves de archivo de bookworm/trixie.)
+// No se comprueba la caducidad de las claves: la rotacion se hace actualizando el keyring con
+// la propia release de Kyanite.
+
+/// Cabecera de un paquete OpenPGP en la posicion i: (tag, bytes de cabecera, longitud del cuerpo).
+fn pgp_header(d: &[u8], i: usize) -> Option<(u8, usize, usize)> {
+    let b = *d.get(i)?;
+    if b & 0x80 == 0 {
+        return None;
+    }
+    if b & 0x40 != 0 {
+        let tag = b & 0x3f;
+        let l1 = *d.get(i + 1)? as usize;
+        if l1 < 192 {
+            Some((tag, 2, l1))
+        } else if l1 < 224 {
+            let l2 = *d.get(i + 2)? as usize;
+            Some((tag, 3, ((l1 - 192) << 8) + l2 + 192))
+        } else if l1 == 255 {
+            let s = d.get(i + 2..i + 6)?;
+            Some((tag, 6, u32::from_be_bytes([s[0], s[1], s[2], s[3]]) as usize))
+        } else {
+            None
+        }
+    } else {
+        let tag = (b >> 2) & 0x0f;
+        match b & 3 {
+            0 => Some((tag, 2, *d.get(i + 1)? as usize)),
+            1 => {
+                let s = d.get(i + 1..i + 3)?;
+                Some((tag, 3, u16::from_be_bytes([s[0], s[1]]) as usize))
+            }
+            2 => {
+                let s = d.get(i + 1..i + 5)?;
+                Some((tag, 5, u32::from_be_bytes([s[0], s[1], s[2], s[3]]) as usize))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Todos los paquetes (tag, cuerpo); se detiene en el primer paquete malformado.
+fn pgp_packets(d: &[u8]) -> Vec<(u8, &[u8])> {
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < d.len() {
+        let (tag, h, l) = match pgp_header(d, i) {
+            Some(x) => x,
+            None => break,
+        };
+        let end = match (i + h).checked_add(l) {
+            Some(e) => e,
+            None => break,
+        };
+        match d.get(i + h..end) {
+            Some(body) => out.push((tag, body)),
+            None => break,
+        }
+        i = end;
+    }
+    out
+}
+
+/// MPI OpenPGP en d[i..]: (bytes big-endian, posicion siguiente).
+fn pgp_mpi(d: &[u8], i: usize) -> Option<(&[u8], usize)> {
+    let hdr = d.get(i..i + 2)?;
+    let bits = u16::from_be_bytes([hdr[0], hdr[1]]) as usize;
+    let len = (bits + 7) / 8;
+    let v = d.get(i + 2..i + 2 + len)?;
+    Some((v, i + 2 + len))
+}
+
+fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    let mut out: Vec<u8> = Vec::new();
+    let mut acc: u32 = 0;
+    let mut bits: u32 = 0;
+    for c in s.bytes() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => break,
+            b' ' | b'\t' | b'\r' | b'\n' => continue,
+            _ => return None,
+        };
+        acc = (acc << 6) | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1u32 << bits) - 1;
+        }
+    }
+    Some(out)
+}
+
+/// Contenido binario de un bloque "armor" (cabeceras, base64, linea de CRC).
+fn dearmor(text: &str) -> Option<Vec<u8>> {
+    let mut lines = text.lines();
+    lines.find(|l| l.starts_with("-----BEGIN PGP"))?;
+    for l in lines.by_ref() {
+        if l.trim().is_empty() {
+            break;
+        }
+    }
+    let mut b64 = String::new();
+    for l in lines {
+        let l = l.trim();
+        if l.starts_with('=') || l.starts_with("-----END") {
+            break;
+        }
+        b64.push_str(l);
+    }
+    b64_decode(&b64)
+}
+
+/// Claves publicas RSA v4 (paquetes primarios, tag 6) de un keyring binario.
+fn rsa_keys_from_packets(data: &[u8], keys: &mut Vec<RsaPublicKey>) {
+    for (tag, b) in pgp_packets(data) {
+        if tag != 6 || b.len() < 8 || b[0] != 4 || b[5] != 1 {
+            continue;
+        }
+        if let Some((n, i)) = pgp_mpi(b, 6) {
+            if let Some((e, _)) = pgp_mpi(b, i) {
+                if let Ok(k) = RsaPublicKey::new(BigUint::from_bytes_be(n), BigUint::from_bytes_be(e)) {
+                    keys.push(k);
+                }
+            }
+        }
+    }
+}
 
 /// Carga las claves publicas de confianza. Fuentes (y solo estas):
 ///   --keyring <fichero>   (si se indica, sustituye a las demas)
 ///   <root>/usr/share/keyrings/debian-archive-keyring.gpg
 ///   <root>/etc/kpkg/trusted.gpg.d/*.gpg|*.asc
-fn load_keyring(ctx: &Ctx) -> Res<Vec<SignedPublicKey>> {
+fn load_keyring(ctx: &Ctx) -> Res<Vec<RsaPublicKey>> {
     let mut paths: Vec<PathBuf> = Vec::new();
     match &ctx.keyring {
         Some(k) => paths.push(k.clone()),
@@ -882,35 +1019,25 @@ fn load_keyring(ctx: &Ctx) -> Res<Vec<SignedPublicKey>> {
             }
         }
     }
-    let mut keys: Vec<SignedPublicKey> = Vec::new();
-    if env::var("KPKG_DEBUG").is_ok() {
-        println!("[debug] keyring files: {:?}", paths);
-    }
+    let mut keys: Vec<RsaPublicKey> = Vec::new();
     for p in &paths {
         let data = match fs::read(p) {
             Ok(d) => d,
             Err(_) => continue,
         };
         if data.starts_with(b"-----BEGIN PGP") {
-            let text = String::from_utf8_lossy(&data).to_string();
-            if let Ok((k, _)) = SignedPublicKey::from_string(&text) {
-                keys.push(k);
+            if let Some(bin) = dearmor(&String::from_utf8_lossy(&data)) {
+                rsa_keys_from_packets(&bin, &mut keys);
             }
         } else {
-            for k in SignedPublicKey::from_bytes_many(io::Cursor::new(data)) {
-                match k {
-                    Ok(k) => keys.push(k),
-                    Err(e) => {
-                        if env::var("KPKG_DEBUG").is_ok() {
-                            println!("[debug] keyring {}: key rejected by the parser: {}", p.display(), e);
-                        }
-                    }
-                }
-            }
+            rsa_keys_from_packets(&data, &mut keys);
         }
     }
+    if env::var("KPKG_DEBUG").is_ok() {
+        println!("[debug] keyring files: {:?}; {} RSA key(s) loaded", paths, keys.len());
+    }
     if keys.is_empty() {
-        return Err("no trusted OpenPGP keys found (looked in usr/share/keyrings/debian-archive-keyring.gpg and \
+        return Err("no trusted OpenPGP (RSA) keys found (looked in usr/share/keyrings/debian-archive-keyring.gpg and \
 etc/kpkg/trusted.gpg.d/). Update the Kyanite base, or pass --keyring <file>. \
 Refusing to use unsigned repositories."
             .into());
@@ -918,33 +1045,86 @@ Refusing to use unsigned repositories."
     Ok(keys)
 }
 
+fn rsa_verify(k: &RsaPublicKey, hash_algo: u8, data: &[u8], sig: &[u8]) -> bool {
+    let size = k.size();
+    if sig.len() > size {
+        return false;
+    }
+    let mut padded = vec![0u8; size - sig.len()];
+    padded.extend_from_slice(sig);
+    match hash_algo {
+        8 => k.verify(Pkcs1v15Sign::new::<Sha256>(), &Sha256::digest(data), &padded).is_ok(),
+        9 => k.verify(Pkcs1v15Sign::new::<Sha384>(), &Sha384::digest(data), &padded).is_ok(),
+        10 => k.verify(Pkcs1v15Sign::new::<Sha512>(), &Sha512::digest(data), &padded).is_ok(),
+        _ => false,
+    }
+}
+
 /// Verifica un InRelease "clearsigned" y devuelve SOLO el texto cubierto por la firma
 /// (nunca el texto crudo: un MITM podria anadir contenido sin firmar alrededor).
-fn verify_inrelease(clearsigned: &str, keys: &[SignedPublicKey]) -> Res<String> {
-    let (msg, _headers) = CleartextSignedMessage::from_string(clearsigned)
-        .map_err(|e| format!("InRelease is not a valid clearsigned message: {}", e))?;
-    let mut reasons: HashMap<String, usize> = HashMap::new();
-    for k in keys {
-        match msg.verify(&k.primary_key) {
-            Ok(_) => return Ok(msg.signed_text().replace("\r\n", "\n")),
-            Err(e) => *reasons.entry(e.to_string()).or_insert(0) += 1,
+/// El texto firmado es canonico: sin espacios finales por linea, con CRLF, sin el ultimo salto.
+fn verify_inrelease(clearsigned: &str, keys: &[RsaPublicKey]) -> Res<String> {
+    let norm = clearsigned.replace("\r\n", "\n");
+    let lines: Vec<&str> = norm.split('\n').collect();
+    let start = lines
+        .iter()
+        .position(|l| *l == "-----BEGIN PGP SIGNED MESSAGE-----")
+        .ok_or("InRelease is not a clearsigned message")?;
+    let mut i = start + 1;
+    while i < lines.len() && !lines[i].is_empty() {
+        i += 1; // cabeceras armor (Hash: ...)
+    }
+    let rest = lines.get(i + 1..).ok_or("malformed clearsigned message")?;
+    let off = rest
+        .iter()
+        .position(|l| *l == "-----BEGIN PGP SIGNATURE-----")
+        .ok_or("InRelease has no signature block")?;
+    let body = &rest[..off];
+    let sigdata = dearmor(&rest[off..].join("\n")).ok_or("malformed signature armor")?;
+
+    let mut canon: Vec<u8> = Vec::new();
+    let mut text = String::new();
+    for (n, l) in body.iter().copied().enumerate() {
+        let l: &str = l.strip_prefix("- ").unwrap_or(l);
+        let l: &str = l.trim_end_matches(|c: char| c == ' ' || c == '\t' || c == '\r');
+        if n > 0 {
+            canon.extend_from_slice(b"\r\n");
+        }
+        canon.extend_from_slice(l.as_bytes());
+        text.push_str(l);
+        text.push('\n');
+    }
+
+    let mut seen = 0usize;
+    for (tag, b) in pgp_packets(&sigdata) {
+        // firma v4, tipo 0x01 (texto), algoritmo RSA
+        if tag != 2 || b.len() < 10 || b[0] != 4 || b[1] != 0x01 || b[2] != 1 {
+            continue;
+        }
+        seen += 1;
+        let hash_algo = b[3];
+        let hl = u16::from_be_bytes([b[4], b[5]]) as usize;
+        let hashed_end = 6 + hl;
+        let ul = match b.get(hashed_end..hashed_end + 2) {
+            Some(x) => u16::from_be_bytes([x[0], x[1]]) as usize,
+            None => continue,
+        };
+        let (sig, _) = match pgp_mpi(b, hashed_end + 2 + ul + 2) {
+            Some(x) => x,
+            None => continue,
+        };
+        let mut data = canon.clone();
+        data.extend_from_slice(&b[..hashed_end]);
+        data.extend_from_slice(&[0x04, 0xff]);
+        data.extend_from_slice(&(hashed_end as u32).to_be_bytes());
+        for k in keys {
+            if rsa_verify(k, hash_algo, &data, sig) {
+                return Ok(text);
+            }
         }
     }
     if env::var("KPKG_DEBUG").is_ok() {
-        println!("[debug] {} key(s) tried, none verified. Reasons:", keys.len());
-        for (r, n) in &reasons {
-            println!("[debug]   {} x {}", n, r);
-        }
-        // motivo real por firma (verify() lo oculta tras "No matching signature found")
-        let mut deep: HashMap<String, usize> = HashMap::new();
-        for k in keys {
-            if let Err(e) = msg.verify_many(|_, sig, data| sig.verify(&k.primary_key, data)) {
-                *deep.entry(e.to_string()).or_insert(0) += 1;
-            }
-        }
-        for (r, n) in &deep {
-            println!("[debug]   per-signature: {} x {}", n, r);
-        }
+        println!("[debug] {} RSA signature(s) found, {} key(s) tried, none verified", seen, keys.len());
     }
     Err("SECURITY ALERT: the OpenPGP signature of InRelease is invalid or was made by an untrusted key. \
 Possible man-in-the-middle, a compromised mirror, or an outdated keyring."
@@ -976,7 +1156,7 @@ fn prev_release_date(ctx: &Ctx, suite: &str) -> Option<i64> {
     None
 }
 
-fn fetch_release(ctx: &Ctx, mirror: &str, suite: &str, keys: &[SignedPublicKey]) -> Res<Release> {
+fn fetch_release(ctx: &Ctx, mirror: &str, suite: &str, keys: &[RsaPublicKey]) -> Res<Release> {
     let url = format!("{}/dists/{}/InRelease", mirror, suite);
     println!("[*] Fetching {}", url);
     let raw = http_get(&url, MAX_RELEASE)?;
@@ -3694,6 +3874,13 @@ fn run() -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base64() {
+        assert_eq!(b64_decode("aGVsbG8=").unwrap(), b"hello");
+        assert_eq!(b64_decode("aGVsbG8h").unwrap(), b"hello!");
+        assert!(b64_decode("a$b").is_none());
+    }
 
     #[test]
     fn dates() {

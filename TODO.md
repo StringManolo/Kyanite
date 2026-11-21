@@ -56,6 +56,8 @@ root@kyanite:~#
 - Missing basics: find
 - Recycle bin
 - CloudBackups
+- Swap Kernel + Check Rufus installs
+- Patch apps that work but they think they don't like nmap
 
 ### Stability
 - Test on Qemu
