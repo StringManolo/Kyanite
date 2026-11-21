@@ -17,6 +17,7 @@ use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use flate2::read::GzDecoder;
+use sha1::Sha1;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use tar::EntryType;
 use xz2::read::XzDecoder;
@@ -982,6 +983,56 @@ fn dearmor(text: &str) -> Option<Vec<u8>> {
     b64_decode(&b64)
 }
 
+/// Key ID (8 ultimos bytes de la huella v4), solo para diagnostico.
+fn pgp_keyid(body: &[u8]) -> String {
+    let mut h = Sha1::new();
+    h.update([0x99u8]);
+    h.update((body.len() as u16).to_be_bytes());
+    h.update(body);
+    let fp = h.finalize();
+    hex::encode(&fp[12..20])
+}
+
+/// Key IDs de emisor declarados en una firma v4 (subpaquetes 16 y 33), solo para diagnostico.
+fn sig_issuers(b: &[u8], hashed_end: usize, ul: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let empty: &[u8] = &[];
+    let areas = [b.get(6..hashed_end).unwrap_or(empty), b.get(hashed_end + 2..hashed_end + 2 + ul).unwrap_or(empty)];
+    for area in areas {
+        let mut i = 0usize;
+        while i < area.len() {
+            let l = area[i] as usize;
+            let (len, hdr) = if l < 192 {
+                (l, 1)
+            } else if l < 255 {
+                if i + 1 >= area.len() {
+                    break;
+                }
+                (((l - 192) << 8) + area[i + 1] as usize + 192, 2)
+            } else {
+                if i + 5 > area.len() {
+                    break;
+                }
+                (u32::from_be_bytes([area[i + 1], area[i + 2], area[i + 3], area[i + 4]]) as usize, 5)
+            };
+            let end = i + hdr + len;
+            if len == 0 || end > area.len() {
+                break;
+            }
+            let ty = area[i + hdr] & 0x7f;
+            let data = &area[i + hdr + 1..end];
+            if ty == 16 && data.len() == 8 {
+                out.push(hex::encode(data));
+            }
+            if ty == 33 && data.len() == 21 {
+                out.push(hex::encode(&data[13..21]));
+            }
+            i = end;
+        }
+    }
+    out
+}
+
 /// Claves publicas RSA v4 (paquetes primarios, tag 6) de un keyring binario.
 fn rsa_keys_from_packets(data: &[u8], keys: &mut Vec<RsaPublicKey>) {
     for (tag, b) in pgp_packets(data) {
@@ -990,8 +1041,16 @@ fn rsa_keys_from_packets(data: &[u8], keys: &mut Vec<RsaPublicKey>) {
         }
         if let Some((n, i)) = pgp_mpi(b, 6) {
             if let Some((e, _)) = pgp_mpi(b, i) {
-                if let Ok(k) = RsaPublicKey::new(BigUint::from_bytes_be(n), BigUint::from_bytes_be(e)) {
-                    keys.push(k);
+                if env::var("KPKG_DEBUG").is_ok() {
+                    println!("[debug] loaded RSA key {} ({} bits)", pgp_keyid(b), n.len() * 8);
+                }
+                match RsaPublicKey::new(BigUint::from_bytes_be(n), BigUint::from_bytes_be(e)) {
+                    Ok(k) => keys.push(k),
+                    Err(err) => {
+                        if env::var("KPKG_DEBUG").is_ok() {
+                            println!("[debug]   rejected by the rsa crate: {}", err);
+                        }
+                    }
                 }
             }
         }
@@ -1113,6 +1172,14 @@ fn verify_inrelease(clearsigned: &str, keys: &[RsaPublicKey]) -> Res<String> {
             Some(x) => x,
             None => continue,
         };
+        if env::var("KPKG_DEBUG").is_ok() {
+            println!(
+                "[debug] signature: hash_algo={} issuer(s)={:?} mpi_bytes={}",
+                hash_algo,
+                sig_issuers(b, hashed_end, ul),
+                sig.len()
+            );
+        }
         let mut data = canon.clone();
         data.extend_from_slice(&b[..hashed_end]);
         data.extend_from_slice(&[0x04, 0xff]);
