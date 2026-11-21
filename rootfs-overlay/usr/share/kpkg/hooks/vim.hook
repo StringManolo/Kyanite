@@ -1,0 +1,5 @@
+[post-install]
+symlink vim.basic usr/bin/vim
+
+[post-remove]
+symlink vim.tiny usr/bin/vim
