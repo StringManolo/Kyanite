@@ -64,10 +64,14 @@ root@kyanite:~#
   - npm
   - python
   - curl
+- Pending:
+  - tor
+  - gcc, make and family
+  - git, gh
 
 ### Stability
 - Test on Qemu
-- Test x86
+- Test x86 (use proot on github actions to test??)
 - Test on udocker
 - Test on proot distro (pr to termux distros?)
 - Test sh and env bash scripts (needs some thinking here about glue by default by allowing user to swap to bash, maybe a security warning with a list of options build into Kpkg)

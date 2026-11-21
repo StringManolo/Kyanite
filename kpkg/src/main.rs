@@ -3558,6 +3558,15 @@ fn base_apply(ctx: &Ctx, stage: &Path) -> Res<()> {
                 continue; // ya esta al dia (p.ej. reanudando una actualizacion interrumpida)
             }
         }
+        // Sin cambios aguas arriba (mismo contenido en la release vieja y la nueva): lo que haya en
+        // local, modificado por ti o por el entorno (p.ej. /etc/resolv.conf), se respeta en silencio.
+        if cur.is_some() && !ctx.force {
+            if let Some(o) = old_map.get(rec.path.as_str()) {
+                if o.kind == rec.kind && o.extra == rec.extra {
+                    continue;
+                }
+            }
+        }
         match &cur {
             None => writes.push(rec),
             Some((k, _)) if *k == 'd' || *k == '?' => blocked.push(rec.path.as_str()),
