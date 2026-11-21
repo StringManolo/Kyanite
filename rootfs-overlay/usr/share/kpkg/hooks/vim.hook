@@ -1,5 +1,14 @@
+# Debian points vi/vim/ex/view at an editor through update-alternatives (a maintainer script,
+# which kpkg never runs). Kyanite ships vim-tiny as the base editor, so installing the full
+# `vim` package must move ALL the names to it, and removing it must put them back.
 [post-install]
 symlink vim.basic usr/bin/vim
+symlink vim.basic usr/bin/vi
+symlink vim.basic usr/bin/ex
+symlink vim.basic usr/bin/view
 
 [post-remove]
 symlink vim.tiny usr/bin/vim
+symlink vim.tiny usr/bin/vi
+symlink vim.tiny usr/bin/ex
+symlink vim.tiny usr/bin/view

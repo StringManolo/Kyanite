@@ -60,6 +60,7 @@ root@kyanite:~#
 - Swap Kernel + Check Rufus installs
 - Patch apps that work but they think they don't like nmap
 - Include support for X11?
+- Test different vimrc configs and themes (exclude from vim-tiny?)
 - Test all typical software (to check for missing hooks) Tested:
   - npm
   - python
