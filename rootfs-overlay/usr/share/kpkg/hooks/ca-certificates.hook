@@ -1,7 +1,7 @@
-# ca-certificates: Debian instala los .crt en /usr/share/ca-certificates y deja que su postinst
-# (update-ca-certificates: perl + debconf) construya /etc/ssl/certs. kpkg lo hace de forma nativa.
-# debconf y openssl solo los necesitaba ese script, asi que no se instalan.
-ignore-depends debconf debconf-2.0 openssl
+# Debian requiere openssl; debconf no es necesario para nuestra implementación.
+ignore-depends debconf debconf-2.0
+
+depends openssl
 
 [post-install]
 builtin update-ca-certificates
