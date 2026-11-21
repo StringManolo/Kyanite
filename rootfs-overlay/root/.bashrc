@@ -101,14 +101,14 @@ export LESS=-R
 # Aliases
 # ------------------------------------------------------------
 alias ls='ls --color=auto'
-alias l='ls'
-alias la='ls -a'
-alias ll='ls -lh'
+alias l='ls --color=auto'
+alias la='ls --color=auto -a'
+alias ll='ls --color=auto -lh'
 alias grep='grep --color=auto'
 alias v='vim'
 clear() { printf '\033c'; }
 c()     { printf '\033c'; }
-cl()    { printf '\033c'; ls; }
+cl()    { printf '\033c'; ls --color=auto; }
 alias ..='cd ..'
 alias ...='cd ../..'
 alias ....='cd ../../..'

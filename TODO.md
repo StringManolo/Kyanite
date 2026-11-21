@@ -46,7 +46,7 @@ root@kyanite:~#
 
 ### Quality Of Life
 - Add better logs to init
-- Add preconfigured scripts
+- ~~Add preconfigured scripts~~
 - ~~Add MOTD~~ (Improve MOTD)
 - Add ~~custom PS1 + alias +~~ good default brush config (.bashrc)
 - ~~Ship vi~~ (check if rust ports are available) by default
