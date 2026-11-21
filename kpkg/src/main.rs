@@ -935,6 +935,16 @@ fn verify_inrelease(clearsigned: &str, keys: &[SignedPublicKey]) -> Res<String> 
         for (r, n) in &reasons {
             println!("[debug]   {} x {}", n, r);
         }
+        // motivo real por firma (verify() lo oculta tras "No matching signature found")
+        let mut deep: HashMap<String, usize> = HashMap::new();
+        for k in keys {
+            if let Err(e) = msg.verify_many(|_, sig, data| sig.verify(&k.primary_key, data)) {
+                *deep.entry(e.to_string()).or_insert(0) += 1;
+            }
+        }
+        for (r, n) in &deep {
+            println!("[debug]   per-signature: {} x {}", n, r);
+        }
     }
     Err("SECURITY ALERT: the OpenPGP signature of InRelease is invalid or was made by an untrusted key. \
 Possible man-in-the-middle, a compromised mirror, or an outdated keyring."
