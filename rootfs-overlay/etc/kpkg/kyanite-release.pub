@@ -1,0 +1,12 @@
+# Clave(s) PUBLICAS ed25519 con las que se firman las releases de Kyanite.
+# Una por linea, 64 caracteres hex (32 bytes). Varias lineas = rotacion de claves.
+#
+# Generarla UNA vez:
+#   openssl genpkey -algorithm ed25519 -out kyanite-release.pem
+#   openssl pkey -in kyanite-release.pem -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n'
+# Pega aqui la salida, y guarda el CONTENIDO de kyanite-release.pem en el secret
+# KYANITE_SIGNING_KEY del repositorio (Settings > Secrets > Actions). Nunca subas el .pem.
+#
+# (sin ninguna clave valida aqui, `kpkg upgrade` se niega a instalar actualizaciones del base)
+
+41895d7e2d05cf7a915fe68f030afda374fd5895cd10491b0992d4ee2561d6b4

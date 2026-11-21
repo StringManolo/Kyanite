@@ -11,6 +11,8 @@ tar = "0.4"
 ar = "0.3"
 sha2 = "0.10"
 hex = "0.4"
+pgp = { version = "0.15", default-features = false }
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 
 # Optimizaciones de tamaño y rendimiento para binarios estáticos (musl)
 [profile.release]

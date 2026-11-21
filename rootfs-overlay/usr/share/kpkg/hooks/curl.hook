@@ -1,0 +1,3 @@
+# Debian solo *recomienda* ca-certificates para curl/libcurl; kpkg ignora Recommends, y sin el
+# bundle curl no puede verificar ningun https://. Se convierte en dependencia real.
+depends ca-certificates

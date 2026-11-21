@@ -1,0 +1,2 @@
+# Igual que curl: sin ca-certificates wget no puede validar https://.
+depends ca-certificates
