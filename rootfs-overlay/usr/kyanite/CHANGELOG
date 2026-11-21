@@ -1,0 +1,45 @@
+# ======================================================================================
+#  Kyanite - CHANGELOG del sistema base
+# ======================================================================================
+#
+#  COMO SACAR UN PARCHE
+#   1. Cambia lo que quieras en el repo (rootfs-overlay, workflow, init, kpkg...).
+#      Los FICHEROS se sincronizan solos: cada rootfs lleva un MANIFEST con el sha256 de todo
+#      y `kpkg upgrade` aplica la diferencia entre el que el usuario tiene y el nuevo
+#      (anade, sustituye y borra lo que ya no existe; respeta lo que el usuario modifico,
+#      dejando la version nueva como <fichero>.kyanite-new). NO hace falta listarlos aqui.
+#   2. SOLO si el cambio no se explica con ficheros, anade abajo una seccion con la version
+#      nueva y una linea por operacion. Ejemplo (tiny-vim pasa a ser vim):
+#
+#         == v0.2.0
+#         -tiny-vim
+#         +vim
+#         note vim sustituye a vim-tiny; /usr/bin/vi sigue existiendo
+#
+#   3. git tag v0.2.0 && git push --tags     (solo tags vX.Y.Z; el workflow construye,
+#      firma y publica la release. Las builds de desarrollo nunca se actualizan solas.)
+#
+#  Un usuario que salta de v0.1.0 a v0.4.0 ejecuta, en orden, las secciones v0.2.0, v0.3.0 y
+#  v0.4.0. Todas las operaciones son idempotentes: si una actualizacion se interrumpe,
+#  `kpkg upgrade` la retoma.
+#
+#  OPERACIONES (una por linea; argumentos separados por espacios; rutas dentro del rootfs)
+#
+#    +PAQUETE[=VERSION]     el base ahora incluye PAQUETE: kpkg lo da por instalado
+#                           (anade a /etc/kpkg/assume-installed)
+#    -PAQUETE               el base ya no incluye PAQUETE (lo quita de assume-installed)
+#    note TEXTO...          mensaje que se muestra al usuario al terminar
+#
+#    mkdir RUTA [MODO]            crea un directorio (modo octal, p.ej. 755)
+#    symlink DESTINO RUTA         crea o reemplaza un enlace simbolico (ln -sf)
+#    link-default DESTINO RUTA    igual, pero solo si RUTA no existe
+#    copy-default ORIGEN RUTA     copia un fichero solo si RUTA no existe
+#    remove RUTA                  borra un fichero o enlace (nunca directorios)
+#    chmod MODO RUTA              cambia permisos (sin setuid/setgid/sticky)
+#    builtin update-ca-certificates   regenera /etc/ssl/certs
+#
+#  (Son las mismas acciones que admiten los hooks de /usr/share/kpkg/hooks/*.hook.
+#   Si necesitas una nueva, se anade a run_action() en kpkg/src/main.rs.)
+#
+# ======================================================================================
+

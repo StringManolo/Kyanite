@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
     tags:
-      - 'v*'
+      - 'v[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
 
 permissions:
@@ -132,6 +132,28 @@ jobs:
             --root ./coreutils-install
 
       # ============================================================
+      # 6c. DEBIAN ARCHIVE KEYRING (kpkg verifica con el la firma de InRelease)
+      # ============================================================
+
+      - name: Fetch and self-test the Debian archive keyring
+        run: |
+          set -euo pipefail
+          mkdir -p keyring
+          # La imagen oficial debian:stable-slim trae el keyring vigente de "stable"
+          # (el de Ubuntu no sirve: puede no incluir la clave de la suite actual).
+          cid="$(docker create debian:stable-slim)"
+          docker cp "$cid:/usr/share/keyrings/debian-archive-keyring.gpg" keyring/debian-archive-keyring.gpg
+          docker rm "$cid" > /dev/null
+          test -s keyring/debian-archive-keyring.gpg
+          # Autotest: debe verificar HOY el InRelease de stable y el de su suite de seguridad.
+          curl -fsSL https://deb.debian.org/debian/dists/stable/InRelease -o InRelease.main
+          gpgv --keyring ./keyring/debian-archive-keyring.gpg InRelease.main
+          CODENAME="$(sed -n 's/^Codename: //p' InRelease.main | head -n1)"
+          curl -fsSL "https://deb.debian.org/debian-security/dists/${CODENAME}-security/InRelease" -o InRelease.sec
+          gpgv --keyring ./keyring/debian-archive-keyring.gpg InRelease.sec
+          echo "Keyring OK for ${CODENAME}"
+
+      # ============================================================
       # 7. ASSEMBLE ROOTFS
       # ============================================================
 
@@ -170,6 +192,11 @@ jobs:
           install -m 0755 \
             "kpkg/target/${{ matrix.rust_target }}/release/kpkg" \
             "$ARCH_DIR/usr/bin/kpkg"
+
+          # kpkg detecta argv[0]: invocado como apt / apt-get / apt-cache habla sintaxis apt
+          for alias in apt apt-get apt-cache; do
+            ln -sfn kpkg "$ARCH_DIR/usr/bin/$alias"
+          done
 
           install -m 0755 \
             "./brush-install/bin/brush" \
@@ -307,16 +334,16 @@ jobs:
             exit 1
           fi
 
-         # --------------------------------------------------------
-         # 7.6c Remove unnecessary Vim documentation
-         # --------------------------------------------------------
+          # --------------------------------------------------------
+          # 7.6c Remove unnecessary Vim documentation
+          # --------------------------------------------------------
 
-         echo "Removing unnecessary Vim documentation..."
+          echo "Removing unnecessary Vim documentation..."
 
-         find "$ARCH_DIR/usr/share/vim" -type f \( \
+          find "../$ARCH_DIR/usr/share/vim" -type f \( \
            -name "version9.txt" -o \
            -name "uganda.txt" \
-         \) -delete
+          \) -delete
 
           # --------------------------------------------------------
           # 7.7 Install the actual dynamic linker
@@ -427,6 +454,13 @@ jobs:
             > "$ARCH_DIR/etc/kpkg/assume-installed"
 
           # --------------------------------------------------------
+          # 7.11a Debian archive keyring (kpkg: firma de repositorios)
+          # --------------------------------------------------------
+
+          install -D -m 0644 keyring/debian-archive-keyring.gpg \
+            "$ARCH_DIR/usr/share/keyrings/debian-archive-keyring.gpg"
+
+          # --------------------------------------------------------
           # 7.11b Overlay: /etc/profile, MOTD, ~/.bashrc, ...
           # --------------------------------------------------------
 
@@ -450,6 +484,33 @@ jobs:
             echo 'HOME_URL="https://github.com/StringManolo/Kyanite"'
             echo 'BUG_REPORT_URL="https://github.com/StringManolo/Kyanite/issues"'
           } > "$ARCH_DIR/etc/os-release"
+
+          # --------------------------------------------------------
+          # 7.11c Base manifest (lo usa `kpkg upgrade` para actualizar el sistema base)
+          # --------------------------------------------------------
+
+          echo "Generating base manifest..."
+
+          for d in usr/share/kpkg usr/share/kyanite etc/kpkg; do
+            [ -d "$ARCH_DIR/$d" ] && find "$ARCH_DIR/$d" -type f -exec chmod 0644 {} +
+          done
+
+          mkdir -p "$ARCH_DIR/usr/share/kyanite"
+          (
+            cd "$ARCH_DIR"
+            find . -mindepth 1 -type l -printf 'l\t%l\t%P\n'
+            find . -mindepth 1 -type d -printf 'd\t\t%P\n'
+            find . -mindepth 1 -type f -printf '%P\0' | while IFS= read -r -d '' f; do
+              printf 'f\t%s\t%s\n' "$(sha256sum < "$f" | cut -d' ' -f1)" "$f"
+            done
+          ) | LC_ALL=C sort -t "$(printf '\t')" -k3,3 > manifest.tmp
+          install -m 0644 manifest.tmp "$ARCH_DIR/usr/share/kyanite/MANIFEST"
+          rm -f manifest.tmp
+          for req in sbin/init usr/bin/kpkg bin/brush etc/os-release; do
+            grep -q -P "\t${req}$" "$ARCH_DIR/usr/share/kyanite/MANIFEST" \
+              || { echo "ERROR: $req missing from the manifest"; exit 1; }
+          done
+          echo "Manifest: $(wc -l < "$ARCH_DIR/usr/share/kyanite/MANIFEST") entries"
 
           # --------------------------------------------------------
           # 7.12 Final rootfs checks
@@ -495,6 +556,37 @@ jobs:
           ls -lh "$ARCHIVE_NAME" "$HASH_NAME"
 
       # ============================================================
+      # 8b. SIGN THE CHECKSUM (ed25519) - solo en releases (tags)
+      # ============================================================
+      # Una sola vez, en local:
+      #   openssl genpkey -algorithm ed25519 -out kyanite-release.pem
+      #   openssl pkey -in kyanite-release.pem -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n'
+      # -> la clave publica (hex) va en rootfs-overlay/etc/kpkg/kyanite-release.pub
+      # -> el contenido de kyanite-release.pem va en el secret KYANITE_SIGNING_KEY
+
+      - name: Sign release checksum
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          KYANITE_SIGNING_KEY: ${{ secrets.KYANITE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          HASH_NAME="kyanite-rootfs-${{ matrix.arch }}.tar.xz.sha256"
+          [ -n "${KYANITE_SIGNING_KEY:-}" ] || { echo "::error::secret KYANITE_SIGNING_KEY is not set"; exit 1; }
+          umask 077
+          printf '%s\n' "$KYANITE_SIGNING_KEY" > "$RUNNER_TEMP/release-key.pem"
+          openssl pkeyutl -sign -inkey "$RUNNER_TEMP/release-key.pem" -rawin -in "$HASH_NAME" -out "${HASH_NAME}.sig"
+          rm -f "$RUNNER_TEMP/release-key.pem"
+          # Autotest: la firma debe verificar con la clave publica que viaja en el rootfs.
+          OK=0
+          for PUBHEX in $(grep -E '^[0-9a-f]{64}$' rootfs-overlay/etc/kpkg/kyanite-release.pub || true); do
+            printf '302a300506032b6570032100%s' "$PUBHEX" | xxd -r -p > "$RUNNER_TEMP/pub.der"
+            if openssl pkeyutl -verify -pubin -inkey "$RUNNER_TEMP/pub.der" -keyform DER -rawin \
+                 -in "$HASH_NAME" -sigfile "${HASH_NAME}.sig" > /dev/null 2>&1; then OK=1; fi
+          done
+          [ "$OK" = 1 ] || { echo "::error::the signature does not verify with rootfs-overlay/etc/kpkg/kyanite-release.pub"; exit 1; }
+          ls -l "${HASH_NAME}.sig"
+
+      # ============================================================
       # 9. UPLOAD ROOTFS ARTIFACT
       # ============================================================
 
@@ -516,6 +608,14 @@ jobs:
           path: kyanite-rootfs-${{ matrix.arch }}.tar.xz.sha256
           archive: false
 
+      - name: Upload signature Artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v7
+        with:
+          name: kyanite-rootfs-${{ matrix.arch }}-sha256-sig
+          path: kyanite-rootfs-${{ matrix.arch }}.tar.xz.sha256.sig
+          archive: false
+
       # ============================================================
       # 11. GITHUB RELEASE
       # ============================================================
@@ -527,5 +627,6 @@ jobs:
           files: |
             kyanite-rootfs-${{ matrix.arch }}.tar.xz
             kyanite-rootfs-${{ matrix.arch }}.tar.xz.sha256
+            kyanite-rootfs-${{ matrix.arch }}.tar.xz.sha256.sig
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
