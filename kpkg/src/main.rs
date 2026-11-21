@@ -22,7 +22,8 @@ use tar::EntryType;
 use xz2::read::XzDecoder;
 
 use ed25519_dalek::{Signature, VerifyingKey};
-use pgp::composed::{CleartextSignedMessage, Deserializable, SignedPublicKey};
+use pgp::composed::cleartext::CleartextSignedMessage;
+use pgp::composed::{Deserializable, SignedPublicKey};
 
 type Res<T> = Result<T, Box<dyn Error>>;
 
