@@ -39,28 +39,31 @@ root@kyanite:~#
 - Check for env replacement for a Rust version 
 - Check all files 1 by 1.
 - Make sure last security patches of kpkg overide stable
-- Add opengpg check of signatures pre https
-- PRIORITY Add autopdate from nightly realeases created from github actions (only when a core component updates) (check how to automatize to rebuild on security related updates of any of the sofware) (download the tarball, readchangelogs or missmatched sha, and replace)
+- ~~Add opengpg check of signatures pre https~~
+- ~~PRIORITY Add autopdate from nightly realeases created from github actions (only when a core component updates) (check how to automatize to rebuild on security related updates of any of the sofware) (download the tarball, readchangelogs or missmatched sha, and replace)~~
 - Balance between using musl static vs glib dinamic for shiped bins
 - Check for new features
 
 ### Quality Of Life
 - Add better logs to init
 - Add preconfigured scripts
-- Add MOTD
-- Add custom PS1 + alias + good default brush config (.bashrc)
-- Ship vi (check if rust ports are available) by default
+- ~~Add MOTD~~ (Improve MOTD)
+- Add ~~custom PS1 + alias +~~ good default brush config (.bashrc)
+- ~~Ship vi~~ (check if rust ports are available) by default
 - Check if installing other shells messes with init and/or brush
-- Ship as own APK for Android with DebianLiveCD4Android as base APK.
+- ~~Ship as own APK for Android with DebianLiveCD4Android as base APK.~~
 - Add proot-distro install script in the repo
-- Add screenshot (generate from logo.txt, try chafta)
+- ~~Add screenshot (generate from logo.txt,~~ try chafta)
 - Missing basics: find, grep
 - Recycle bin
 - CloudBackups
 - Swap Kernel + Check Rufus installs
 - Patch apps that work but they think they don't like nmap
 - Include support for X11?
-- Test all typical software (to check for missing hooks)
+- Test all typical software (to check for missing hooks) Tested:
+  - npm
+  - python
+  - curl
 
 ### Stability
 - Test on Qemu
@@ -73,8 +76,8 @@ root@kyanite:~#
 
 
 ### Size
-- Remove /usr/share/vim/vim91/doc/version9.txt (2 MB)
-- Remove /usr/share/vim/vim91/doc/uganda.txt (12 KB)
+- ~~Remove /usr/share/vim/vim91/doc/version9.txt (2 MB)~~
+- ~~Remove /usr/share/vim/vim91/doc/uganda.txt (12 KB)~~
 
 - Inspect Brush (13MB) (replacement??)
 - Inspect coreutils (11MB) (replacement??)
@@ -82,4 +85,4 @@ root@kyanite:~#
 - Slowly replace or fork
 
 ### Other
-- Use as base to new security based distro (based on SOSCW but made with a single install script that download the lastest versions and patches them. Every tool has its own script and they are all called from a main script)
+- Use as base to new security based distro (based on SOSCW but made with a single install script that download the lastest versions and patches them. Every tool has its own script and they are all called from a main script -this should be done in actions to ship the tools.tar.xz on demand?-)
