@@ -307,6 +307,17 @@ jobs:
             exit 1
           fi
 
+         # --------------------------------------------------------
+         # 7.6c Remove unnecessary Vim documentation
+         # --------------------------------------------------------
+
+         echo "Removing unnecessary Vim documentation..."
+
+         find "$ARCH_DIR/usr/share/vim" -type f \( \
+           -name "version9.txt" -o \
+           -name "uganda.txt" \
+         \) -delete
+
           # --------------------------------------------------------
           # 7.7 Install the actual dynamic linker
           # --------------------------------------------------------

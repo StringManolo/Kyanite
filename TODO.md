@@ -2,6 +2,38 @@
 
 ### Investigate
 - Check why x86 build is double the size of arm
+- Qemu error:
+```
+[dlc] rootfs channel: /dev/vport1p1
+[dlc] receiving rootfs into RAM...
+[dlc] rootfs ready, switching root. Tip: run 'stty rows N cols M' to match your screen.
+[dlc] starting /bin/sh (this is PID 1: leaving it powers the VM off)
+[init] tcsetpgrp(0, 166) FALLO: Not a tty (os error 25)
+
+       /\
+      /  \
+     / /\ \
+    / /  \ \     K Y A N I T E
+    \ \  / /     -------------
+     \ \/ /      Secure. Light.
+      \  /       Comfortable.
+       \/
+
+  Kyanite 7a5a906 (aarch64)
+
+  Kernel    Linux 6.12.107+deb13-arm64
+  Uptime    0h 0m
+  Memory    140 MiB / 464 MiB
+  Disk      114M used of 419M (28%)
+
+  Packages  kpkg update && kpkg add <package>
+  Editor    vi
+  Project   https://github.com/StringManolo/Kyanite
+
+  Edit /etc/update-motd.d/ or /etc/motd to customize. Silence with: touch ~/.hushlogin
+root@kyanite:~#
+```
+- Also fix tty on qemu
 
 ### Security
 - Check for env replacement for a Rust version 
@@ -12,7 +44,6 @@
 - Balance between using musl static vs glib dinamic for shiped bins
 
 ### Quality Of Life
-- Add README.md
 - Add better logs to init
 - Add preconfigured scripts
 - Add MOTD
@@ -23,6 +54,8 @@
 - Add proot-distro install script in the repo
 - Add screenshot (generate from logo.txt, try chafta)
 - Missing basics: find
+- Recycle bin
+- CloudBackups
 
 ### Stability
 - Test on Qemu
@@ -42,3 +75,6 @@
 - Inspect coreutils (11MB) (replacement??)
 
 - Slowly replace or fork
+
+### Other
+- Use as base to new security based distro (based on SOSCW but made with a single install script that download the lastest versions and patches them. Every tool has its own script and they are all called from a main script)
