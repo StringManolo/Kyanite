@@ -1,13 +1,47 @@
 #!/bin/brush
-# /etc/update-motd.d/00-logo - prints /etc/kyanite/logo.txt.
-# The logo is pre-coloured with 256-colour escapes, so it is skipped on
-# terminals without colour support. Replace logo.txt freely (e.g. with chafa
-# output); keep it under ~40 columns so it fits narrow phone screens.
+# /etc/update-motd.d/00-logo - prints the Kyanite banner (logo + name + tagline).
+#
+# Banners live in /etc/kyanite/logo/banner-<N>.<truecolor|256>.ans, where N is
+# the logo width in columns (the whole banner is N + ~17 columns wide):
+#   36 -> 53 cols   30 -> 46   24 -> 41   18 -> 33   14 -> 30   11 -> 27
+# The biggest one that fits the terminal is used, but never bigger than
+# KYANITE_BANNER_MAX (default 24: 10 rows tall, still crisp). When the width
+# cannot be detected, 24 is used. Terminals without 256 colours get no logo.
 . /etc/kyanite/colors.sh
 
 [ "$C_256" = 1 ] || exit 0
-[ -r /etc/kyanite/logo.txt ] || exit 0
+
+variant=256
+[ "$C_TRUE" = 1 ] && variant=truecolor
+
+# Terminal width: $COLUMNS if the shell exported it, else stty (if present).
+cols=${COLUMNS:-}
+if [ -z "$cols" ] && command -v stty >/dev/null 2>&1; then
+  cols=$(stty size 2>/dev/null)
+  cols=${cols#* }
+fi
+case "$cols" in ''|*[!0-9]*) cols=0 ;; esac
+
+max=${KYANITE_BANNER_MAX:-24}
+n=
+if [ "$cols" -eq 0 ]; then
+  n=24
+else
+  for size in 36 30 24 18 14 11; do
+    [ "$size" -le "$max" ] || continue
+    case $size in
+      36) need=53 ;; 30) need=46 ;; 24) need=41 ;;
+      18) need=33 ;; 14) need=30 ;; 11) need=27 ;;
+    esac
+    if [ "$cols" -ge "$need" ]; then n=$size; break; fi
+  done
+fi
+[ -n "$n" ] || n=11
+[ "$n" -le "$max" ] || n=$max
+
+file=/etc/kyanite/logo/banner-$n.$variant.ans
+[ -r "$file" ] || exit 0
 
 printf '\n'
-cat /etc/kyanite/logo.txt
+cat "$file"
 printf '\n'

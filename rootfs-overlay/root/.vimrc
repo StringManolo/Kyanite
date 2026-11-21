@@ -24,7 +24,7 @@ endif
 " Add small horizontal padding
 set foldcolumn=1
 set numberwidth=1
-set colorcolumn=87
+set colorcolumn=89
 
 " Enable line numbers
 " set number
