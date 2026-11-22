@@ -5,6 +5,7 @@
 - ~~Qemu error: tcsetpgrp(0, 166) FALLO: Not a tty (os error 25)~~
 - ~~Also fix tty on qemu~~
 - Upgrade don't apply cleanly to init component (add option to 'force' to don't generate '-new' files for core components when specified on the update patch)
+- Test if base apk updates work for arm32 (or it downloads the arm64 rootfs) 
 
 ### Security
 - Check for env replacement for a Rust version 
