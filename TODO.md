@@ -27,12 +27,14 @@
 - ~~Add screenshot (generate from logo.txt,~~ try chafta)
 - Missing basics: find, grep, which
 - Recycle bin
+- Fix KyaniteAndroid defaults to autoinstall and autostart the system by default in the first run (after apk install), to help non tech users.
 - CloudBackups
 - Swap Kernel + Check Rufus installs
 - Patch apps that work but they think they don't like nmap (using hook)
 - Include support for X11?
 - ~~Test different vimrc configs and themes (exclude from vim-tiny?)~~
 - translate SECURITY.md
+- Full KyaniteAndroid translation to the 4 supported languages)
 - Test all typical software (to check for missing hooks) Tested:
   - npm
   - python
