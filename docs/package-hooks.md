@@ -1,102 +1,73 @@
 # Package hooks
 
-Kyanite does not run Debian package maintainer scripts. Instead, package
-setup that is required for supported packages is described by
-declarative hooks.
+Kyanite uses declarative hooks for package setup instead of executing Debian package maintainer scripts.
 
-This approach avoids executing arbitrary package-provided shell scripts
-during installation. It also means that packages requiring
-maintainer-script behavior may need a Kyanite hook or manual setup.
+Hooks describe a limited set of operations that `kpkg` can perform inside the target root filesystem. They can also add or ignore package dependencies.
 
 ## Hook locations
 
 System-provided hooks are stored in:
 
-``` text
+```text
 /usr/share/kpkg/hooks/<package>.hook
 ```
 
-Local overrides are stored in:
+Local hook overrides are stored in:
 
-``` text
+```text
 /etc/kpkg/hooks.d/
 ```
 
-The exact hook filename and syntax should follow the examples shipped
-with the Kyanite source and root filesystem.
+## Supported actions
 
-## Available action families
+The hook engine currently provides a closed set of actions:
 
-The hook engine uses a closed set of actions confined to the target root
-filesystem:
-
--   `mkdir`
--   `symlink`
--   `link-default`
--   `copy-default`
--   `remove`
--   `chmod`
--   `builtin`
+- `mkdir`
+- `symlink`
+- `link-default`
+- `copy-default`
+- `remove`
+- `chmod`
+- `builtin`
 
 Hooks can also add or ignore dependencies.
 
-The action set is intentionally limited. A hook is not a shell script
-and cannot run arbitrary commands.
+These actions are declarative; a hook is not an arbitrary shell script.
 
 ## Example: CA certificates
 
-The `ca-certificates` package uses native Kyanite functionality to
-rebuild:
+The `ca-certificates` package uses native Kyanite functionality to rebuild:
 
-``` text
+```text
 /etc/ssl/certs/ca-certificates.crt
 ```
 
-The `curl` hook adds a dependency on `ca-certificates`, so HTTPS
-certificate trust is available when curl is installed.
-
-The current native implementation generates the certificate bundle but
-does not create the `<hash>.0` links used by applications that rely on
-`CApath`. See [Known limitations](limitations.md).
+The `curl` hook adds a dependency on `ca-certificates`, so the certificate bundle is available when curl is installed.
 
 ## Re-running hooks
 
-Use:
+Run the setup hooks for installed packages with:
 
-``` sh
+```sh
 kpkg configure
 ```
 
-to re-run hooks for installed packages, or specify package names:
+To configure specific packages:
 
-``` sh
+```sh
 kpkg configure curl ca-certificates
 ```
 
-This is useful after correcting a hook or when a previous configuration
-step did not complete.
+## Developing a hook
 
-## Adding or changing hooks
+When adding a hook, first identify the setup performed by the package's Debian maintainer scripts. Decide which parts are needed in Kyanite, then express those operations using supported hook actions or an existing native `builtin`.
 
-Before adding a hook:
+A useful test cycle includes:
 
-1.  Identify the setup normally performed by the package's maintainer
-    scripts.
-2.  Determine which parts are required for Kyanite's supported use
-    cases.
-3.  Express the required setup using only supported declarative actions
-    or an existing native `builtin`.
-4.  Add or adjust dependencies where necessary.
-5.  Test installation, reconfiguration and removal behavior.
-6.  Document any behavior that cannot be reproduced and any manual steps
-    users may need.
+1. Installing the package into a clean rootfs.
+2. Checking the resulting files and configuration.
+3. Running `kpkg configure` again.
+4. Removing the package and checking cleanup behavior.
+5. Testing any dependencies introduced by the hook.
 
-Do not assume that every Debian package can be made fully functional
-with a hook. Some packages depend on service managers, system users,
-generated configuration, triggers or other maintainer-script behavior
-that Kyanite may not implement.
-
-For implementation details and the authoritative hook grammar, consult
-the hook parser and examples in the source tree. This guide
-intentionally does not invent a grammar beyond the documented action
-set.
+Consult the hook examples and implementation in the source tree for the exact grammar. This guide lists the action families but does not define parser syntax.

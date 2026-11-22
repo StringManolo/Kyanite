@@ -1,84 +1,65 @@
 # Development
 
-This guide summarizes the current build workflow and points to the
-authoritative build configuration.
+This guide introduces the Kyanite source layout and build workflow. The GitHub Actions workflow is the authoritative source for the exact build commands and dependency versions.
 
-## Source and build workflow
+## Build workflow
 
 The build is defined in:
 
-``` text
+```text
 .github/workflows/build-rootfs.yml
 ```
 
-The workflow builds two musl targets:
+It targets:
 
--   `aarch64-unknown-linux-musl`
--   `x86_64-unknown-linux-musl`
+- `aarch64-unknown-linux-musl`
+- `x86_64-unknown-linux-musl`
 
 At a high level, the workflow:
 
-1.  Computes the build version with `git describe --tags --always`.
-2.  Builds Kyanite init and `kpkg` with Cargo.
-3.  Builds Brush and uutils coreutils for the musl targets.
-4.  Assembles the root filesystem.
-5.  Adds the glibc runtime, `env`, `vi`, Debian archive keyring and
-    required support files.
-6.  Applies `rootfs-overlay/`.
-7.  Generates the base manifest.
-8.  Creates the compressed rootfs archive and SHA256 checksum.
-9.  On release tags, signs the checksum.
-
-The workflow file is the source of truth for exact commands, versions
-and build dependencies.
+1. Computes the version with `git describe --tags --always`.
+2. Builds Kyanite init and `kpkg` with Cargo.
+3. Builds Brush and uutils coreutils for the musl targets.
+4. Assembles the root filesystem.
+5. Adds the runtime libraries and supporting packages.
+6. Applies `rootfs-overlay/`.
+7. Generates the base manifest.
+8. Creates the compressed archive and SHA256 checksum.
+9. Signs the checksum for release builds.
 
 ## Build prerequisites
 
-The documented local prerequisites are:
+The currently documented local prerequisites are:
 
--   Rust toolchain
--   Rust musl targets for the architectures being built
--   `musl-tools`
--   `gcc-aarch64-linux-gnu` for aarch64 cross-compilation
+- A Rust toolchain
+- The required Rust musl targets
+- `musl-tools`
+- `gcc-aarch64-linux-gnu` for aarch64 cross-compilation
 
-Additional tools may be required by the workflow or by the host
-distribution. Check the workflow before setting up a new build
-environment.
+Check the workflow for any additional tools or packages needed by the current build.
 
-## Rootfs overlay
+## Root filesystem overlay
 
-The `rootfs-overlay/` directory contains files installed into the
-generated root filesystem, including shell configuration and Kyanite
-configuration.
+The `rootfs-overlay/` directory contains files copied into the generated root filesystem, including configuration and shell environment files.
 
-When changing files in the overlay, verify that:
-
--   paths are correct relative to the root filesystem;
--   executable permissions are preserved where required;
--   scripts and configuration match the programs included in the base;
--   generated manifests and update behavior remain correct.
+When modifying the overlay, check file paths, permissions and how the changes interact with the base manifest and update mechanism.
 
 ## Testing changes
 
-Test changes in a disposable rootfs before relying on them. For
-package-manager changes, test at least the relevant install, upgrade,
-removal, repair and audit paths.
+Use a disposable root filesystem when testing changes.
 
-For base updates, test both unmodified files and locally modified files
-to confirm that the update mechanism preserves user changes as intended.
+For package-manager work, test the relevant installation, upgrade, removal, repair, configuration and audit paths. For base-update work, test both unmodified files and files changed by the user.
 
 ## Version labels
 
-Builds use `git describe --tags --always`. A build from a commit after a
-release tag may be labelled with a value such as `v0.1.0-3-g1a2b3c4`.
-When no tag is available, the version may be the commit hash.
+Builds use `git describe --tags --always`. A commit after a release tag may be labelled with a value such as `v0.1.0-3-g1a2b3c4`. When no tag is available, the version may be the commit hash.
 
-Development builds are not eligible for automatic base updates. Only
-release tags matching `vX.Y.Z` are considered.
+Only release tags matching `vX.Y.Z` are eligible for automatic base updates.
 
-## Further reading
+## Related documentation
 
--   [Architecture](architecture.md)
--   [Package manager](kpkg.md)
--   [Package hooks](package-hooks.md)
--   [Release process](releases.md)
+- [Architecture](architecture.md)
+- [Package manager](kpkg.md)
+- [Package hooks](package-hooks.md)
+- [Release process](releases.md)
+- [Roadmap and investigations](roadmap.md)

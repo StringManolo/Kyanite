@@ -1,104 +1,59 @@
 # Architecture
 
-Kyanite is a minimal Linux root filesystem designed around a small set
-of preinstalled Rust components and a Debian-compatible package
-environment.
+Kyanite is a minimal Linux root filesystem built around a small set of Rust-based core components and a Debian-compatible package environment.
 
-It is currently a userspace root filesystem, not a complete bootable
-distribution: it does not ship its own kernel and is run through PRoot.
-
-## Design overview
-
-The base is intentionally small. Its interactive components are
-primarily Rust programs, while a glibc runtime is included so that
-dynamically linked Debian packages can run.
+## System overview
 
 The preinstalled Rust components are statically linked against musl:
 
--   Kyanite init
--   `kpkg`
--   Brush
--   uutils coreutils
+- Kyanite init
+- `kpkg`
+- Brush
+- uutils coreutils
 
-The rootfs also includes glibc and supporting runtime libraries for
-Debian packages.
+The root filesystem also includes a glibc runtime for dynamically linked Debian packages.
 
-## Startup
+## Startup sequence
 
-The main startup path is:
+The basic startup flow is:
 
-1.  A host launcher enters the rootfs, typically through PRoot.
-2.  The launcher invokes `/bin/sh`.
-3.  `/bin/sh` is a symlink to `/sbin/init`.
-4.  Kyanite init configures the terminal and starts Brush as a login
-    shell.
-5.  Init reaps orphaned processes and exits when the shell exits.
+1. A launcher enters the root filesystem, typically using PRoot.
+2. The launcher invokes `/bin/sh`.
+3. `/bin/sh` points to `/sbin/init`.
+4. Kyanite init configures the terminal and starts Brush as a login shell.
+5. Init reaps orphaned processes and exits when the shell exits.
 
-Init is PID 1 inside the Kyanite environment.
+Init runs as PID 1 inside the Kyanite environment.
 
-## Components
+## Main components
 
-  -----------------------------------------------------------------------
-  Component                           Responsibility
-  ----------------------------------- -----------------------------------
-  `kyanite-init`                      PID 1, login startup, terminal/job
-                                      control and orphan reaping
-
-  Brush                               Interactive shell
-
-  uutils coreutils                    Common command-line utilities
-                                      through a multicall binary
-
-  `kpkg`                              Debian repository metadata,
-                                      dependency resolution, package
-                                      installation and base updates
-
-  glibc runtime                       Runtime compatibility for
-                                      dynamically linked Debian packages
-
-  `vim-tiny`                          Minimal vi-compatible editor
-  -----------------------------------------------------------------------
+| Component | Responsibility |
+| --- | --- |
+| `kyanite-init` | PID 1, shell startup, terminal and job control, orphan reaping |
+| Brush | Interactive shell |
+| uutils coreutils | Common command-line utilities |
+| `kpkg` | Package indexes, dependency resolution, package installation and base updates |
+| glibc runtime | Runtime support for Debian packages |
+| `vim-tiny` | Minimal vi-compatible editor |
 
 ## musl and glibc
 
-Kyanite uses musl for its statically linked preinstalled Rust tools.
-This keeps the base components independent of the glibc runtime.
+Kyanite uses musl for its statically linked Rust tools. This keeps the core utilities independent of the glibc runtime.
 
-The rootfs also contains glibc for packages installed from Debian
-repositories. This is a deliberate split: a small base with Rust
-components, alongside compatibility with Debian's glibc-linked package
-ecosystem.
+The rootfs also includes glibc so packages from Debian repositories can run. This combines a compact base with access to Debian's package ecosystem.
 
-At present, the glibc runtime and `vim-tiny` are obtained from the build
-runner's Ubuntu distribution, while `kpkg` installs packages from Debian
-stable. Their glibc versions may therefore differ.
+## Package installation
 
-## Package installation model
+`kpkg` downloads Debian packages, verifies repository metadata and package hashes, resolves dependencies and extracts packages into the target root.
 
-`kpkg` downloads Debian packages, verifies repository metadata and
-package hashes, resolves dependencies, and extracts packages into the
-target root.
+Package setup is handled through declarative Kyanite hooks. See [Package hooks](package-hooks.md).
 
-It does not execute package maintainer scripts. Kyanite uses declarative
-package hooks for supported setup tasks instead. See [Package
-hooks](package-hooks.md).
+## Base updates
 
-## Rootfs updates
+Kyanite base updates are separate from ordinary Debian package upgrades. Eligible GitHub releases contain the files and manifest needed to update the base while preserving locally modified files.
 
-The Kyanite base is updated separately from ordinary Debian packages.
-Eligible `vX.Y.Z` GitHub releases contain a manifest and update data.
-The update process verifies the release, stages it, and applies changes
-file by file while preserving locally modified files.
+See [Releases](releases.md) and [kpkg base updates](kpkg.md#updating-the-kyanite-base).
 
-See [Release process](releases.md) and [kpkg base
-updates](kpkg.md#base-updates).
+## Runtime model
 
-## Security boundary
-
-PRoot provides a userspace environment, not the isolation boundary of a
-virtual machine or a separate kernel. Do not treat a Kyanite rootfs
-under PRoot as a security boundary against the host or other processes
-with equivalent permissions.
-
-See [SECURITY.md](../SECURITY.md) for the project's threat model and
-security notes.
+Kyanite is currently distributed as a root filesystem and uses the host kernel through its runtime environment. For platform and isolation considerations, see [Known limitations](limitations.md) and [SECURITY.md](../SECURITY.md).

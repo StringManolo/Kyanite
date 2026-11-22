@@ -1,41 +1,44 @@
 # Installation
 
-Kyanite is distributed as a root filesystem archive. It is not currently
-a bootable disk image and does not include its own kernel. The supported
-runtime described here is PRoot.
+Kyanite is distributed as a Linux root filesystem archive. It can also be used through the dedicated Android application.
 
-## Download a release
+## Android
 
-Open the [Kyanite Releases
-page](https://github.com/StringManolo/Kyanite/releases) and download the
-archive for your architecture:
+The simplest way to get started on an Android device is to install the Kyanite application.
 
--   `kyanite-rootfs-aarch64.tar.xz` for ARM64
--   `kyanite-rootfs-x86_64.tar.xz` for AMD64
+- [Download the latest Kyanite APK](https://github.com/StringManolo/KyaniteAndroid/releases/latest/download/Kyanite.apk)
+- [KyaniteAndroid source code and documentation](https://github.com/StringManolo/KyaniteAndroid)
 
-Download the corresponding `.sha256` file as well. Release checksums are
-signed; see [Verifying releases](../SECURITY.md#verifying-releases) for
-signature verification.
+The Android application provides its own setup and launch experience.
 
-## Verify the archive
+## Download a Linux root filesystem
 
-From the directory containing the archive and checksum:
+Open the [Kyanite Releases page](https://github.com/StringManolo/Kyanite/releases) and download the archive for your architecture:
 
-``` sh
+| Architecture | Archive |
+| --- | --- |
+| ARM64 | `kyanite-rootfs-aarch64.tar.xz` |
+| AMD64 | `kyanite-rootfs-x86_64.tar.xz` |
+
+Download the matching `.sha256` and `.sha256.sig` files too.
+
+## Verify the download
+
+Check the SHA256 checksum from the directory containing the downloaded files:
+
+```sh
 sha256sum -c kyanite-rootfs-aarch64.tar.xz.sha256
 ```
 
-Use the checksum filename matching the archive you downloaded. Do not
-continue if verification fails.
+Use the checksum filename matching your downloaded archive.
 
-For signature verification, follow the instructions in
-[SECURITY.md](../SECURITY.md#verifying-releases).
+To verify the Ed25519 signature as well, follow [Verifying releases](../SECURITY.md#verifying-releases).
 
 ## Extract the root filesystem
 
-Create a directory and extract the archive into it:
+Create a directory and extract the archive:
 
-``` sh
+```sh
 mkdir kyanite
 tar -xpf kyanite-rootfs-aarch64.tar.xz -C kyanite
 ```
@@ -44,9 +47,9 @@ Replace the archive name with the one matching your architecture.
 
 ## Start with PRoot
 
-A simplified launch command is:
+A basic launch command looks like this:
 
-``` sh
+```sh
 proot --kill-on-exit --link2symlink -0 -r kyanite \
   -b /dev -b /proc -b /sys \
   -w /root \
@@ -57,40 +60,10 @@ proot --kill-on-exit --link2symlink -0 -r kyanite \
     /bin/sh -l
 ```
 
-A real launcher may need additional bindings, depending on the host. On
-Android, some files under `/proc` may not be readable by applications; a
-launcher may need to bind replacement files. The Android application
-provides its own integration and launch experience.
+A launcher may need additional bindings depending on the host environment. On Android, some files under `/proc` may need special handling.
 
-## What happens at startup
+## Startup behavior
 
-`/bin/sh` is a symlink to `/sbin/init`. When a launcher starts
-`/bin/sh`, Kyanite's init starts Brush as an interactive login shell.
-Init manages the terminal and exits when the shell exits.
+`/bin/sh` is a symlink to `/sbin/init`. When the launcher starts `/bin/sh`, Kyanite init starts Brush as an interactive login shell.
 
-`/usr/bin/env` is included because launchers use it to create a clean
-environment.
-
-## Supported and unverified environments
-
-Kyanite has been tested through
-[DebianLiveCD4Android](https://github.com/StringManolo/DebianLiveCD4Android).
-
-The following environments are expected to be possible but have not yet
-been verified:
-
--   `proot-distro` in Termux
--   QEMU
--   x86 hosts
--   udocker
-
-Do not interpret an unverified environment as officially supported.
-
-## Android application
-
-An Android application is also available:
-
--   [Download the latest
-    APK](https://github.com/StringManolo/KyaniteAndroid/releases/latest/download/Kyanite.apk)
--   [Android application source and
-    documentation](https://github.com/StringManolo/KyaniteAndroid)
+For more about the shell and login environment, see the [usage guide](usage.md).

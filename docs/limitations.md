@@ -1,52 +1,34 @@
-# Known limitations
+# Known limitations and compatibility notes
 
-Kyanite is experimental and is not yet feature-complete. This document
-collects the limitations currently described by the project.
+This page collects current implementation details that may affect compatibility or expected behavior. It is intended as a technical reference.
 
 ## Runtime and platform
 
--   Kyanite does not include a kernel. It is a root filesystem currently
-    run in userspace through PRoot.
--   The rootfs has been tested through DebianLiveCD4Android.
--   `proot-distro`, QEMU, x86 hosts and udocker have not yet been
-    verified.
--   On Android 8 and later, some files under `/proc` may not be readable
-    by applications. Android launchers may need to bind replacement
-    files.
+- Kyanite is distributed as a root filesystem and does not currently include its own kernel.
+- The current runtime uses PRoot and shares the host kernel.
+- The rootfs has been tested through [DebianLiveCD4Android](https://github.com/StringManolo/DebianLiveCD4Android).
+- `proot-distro`, QEMU and udocker still need further testing.
+- On Android 8 and later, some files under `/proc` may not be readable by applications. Launchers may need to bind replacement files.
 
 ## Package manager
 
--   `kpkg` does not execute Debian maintainer scripts (`preinst`,
-    `postinst`, `prerm`, `postrm`). Packages that require these actions
-    need a Kyanite hook or manual setup.
--   `Recommends` and `Suggests` are not installed automatically. A hook
-    may add a dependency when it is required for a supported use case.
--   Preinstalled components such as `libc6` and `vim-tiny` are updated
-    through a Kyanite base release, not through ordinary `kpkg upgrade`.
--   The base glibc runtime and `vim-tiny` currently come from the build
-    runner's Ubuntu distribution, while `kpkg` installs packages from
-    Debian stable. Their glibc versions may differ.
+- `kpkg` does not execute Debian maintainer scripts (`preinst`, `postinst`, `prerm`, `postrm`). Packages that require those actions need a Kyanite hook or manual setup.
+- `Recommends` and `Suggests` are not installed automatically.
+- Preinstalled base components are updated through Kyanite releases rather than ordinary package upgrades.
+- The build currently obtains some runtime components from the Ubuntu build environment while `kpkg` installs packages from Debian stable. Their versions may differ.
 
 ## Certificates
 
-The native `update-ca-certificates` implementation generates the
-`/etc/ssl/certs/ca-certificates.crt` bundle. It does not create the
-`<hash>.0` links used by programs that rely on `CApath`.
+The native `update-ca-certificates` implementation generates `/etc/ssl/certs/ca-certificates.crt`. It does not create the `<hash>.0` links used by applications that rely on `CApath`.
 
-## Base image
+## Shell and init behavior
 
--   The `x86_64` rootfs is currently roughly twice the size of the
-    `aarch64` rootfs. The cause is under investigation.
--   The remaining GNU `env` and `vim-tiny` components are planned for
-    replacement with Rust implementations.
+`/bin/sh` points to the Kyanite init executable. This is part of the current startup design. A package script that invokes `/bin/sh` may therefore interact with init rather than a conventional shell when run outside the expected startup path. The MOTD scripts are explicitly run with `/bin/brush`.
 
-## Security considerations
+Shell compatibility and the behavior of packages that assume a conventional `/bin/sh` are areas for further testing.
 
-PRoot is not a virtual machine and should not be treated as a security
-boundary. The rootfs shares the host kernel and depends on the host
-launcher and its configuration.
+## Security and isolation
 
-Review [SECURITY.md](../SECURITY.md) before using Kyanite for
-security-sensitive workloads. Do not assume that the experimental status
-or Rust implementation of base components makes the complete system
-vulnerability-free.
+PRoot is not a virtual machine or an independent kernel security boundary. The Kyanite environment shares the host kernel and depends on the host launcher and its configuration.
+
+See [SECURITY.md](../SECURITY.md) for the threat model, protections and security reporting instructions.

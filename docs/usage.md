@@ -1,97 +1,74 @@
 # Usage
 
-This guide describes the shell environment included in the Kyanite root
-filesystem.
+This guide covers the interactive shell environment included with Kyanite and the main ways to customize it.
 
-## Login shell
+## Starting a session
 
-Kyanite's `/bin/sh` is a symlink to `/sbin/init`. Init starts Brush as
-an interactive login shell, configures terminal ownership and job
-control, reaps orphaned processes, and exits when the shell exits.
+Kyanite's `/bin/sh` points to `/sbin/init`. Init configures the terminal and starts Brush as an interactive login shell.
 
-The login environment is configured through files in the root filesystem
-overlay.
+When the shell exits, init exits and the session ends.
 
-## Shell configuration
+## Shell configuration files
 
-  -----------------------------------------------------------------------
-  Path                                Purpose
-  ----------------------------------- -----------------------------------
-  `/etc/profile`                      Read by Brush on login; prints the
-                                      MOTD and loads `~/.bashrc`
+| Path | Purpose |
+| --- | --- |
+| `/etc/profile` | Login profile; prints the MOTD and loads `~/.bashrc` |
+| `/root/.bashrc` | Prompt, history settings, aliases and helper functions |
+| `/etc/update-motd.d/` | Scripts that generate the message of the day |
+| `/etc/motd` | Optional static text printed after the MOTD scripts |
+| `/etc/kyanite/logo.txt` | ASCII logo displayed by the logo MOTD script |
+| `/etc/os-release` | Distribution name and build version |
 
-  `/root/.bashrc`                     Prompt, history settings, aliases
-                                      and helper functions
+The default files are maintained in the repository's [`rootfs-overlay/`](../rootfs-overlay/) directory.
 
-  `/etc/update-motd.d/`               MOTD scripts, executed in name
-                                      order at each login
+## Customize the message of the day
 
-  `/etc/motd`                         Optional static text printed after
-                                      the scripts; create it if desired
+MOTD scripts run in filename order from `/etc/update-motd.d/`.
 
-  `/etc/kyanite/logo.txt`             ASCII logo displayed by the logo
-                                      MOTD script
+To disable a script while keeping the file:
 
-  `/etc/os-release`                   Build name and version; also used
-                                      by the MOTD
-  -----------------------------------------------------------------------
-
-The shipped rootfs overlay is available in the repository's
-[`rootfs-overlay/`](../rootfs-overlay/) directory.
-
-## Customizing the MOTD
-
-MOTD scripts are run from `/etc/update-motd.d/` in name order. To
-disable a script without deleting it, remove its executable bit:
-
-``` sh
+```sh
 chmod -x /etc/update-motd.d/00-logo
 ```
 
-To add static text after the scripts:
+To add a static message:
 
-``` sh
-printf '%s\n' 'Welcome to Kyanite' > /etc/motd
+```sh
+printf '%s\\n' 'Welcome to Kyanite' > /etc/motd
 ```
 
-To silence the MOTD for a login, create:
+To silence the MOTD for your login:
 
-``` sh
+```sh
 touch ~/.hushlogin
 ```
 
 Colours are disabled when `NO_COLOR` is set or `TERM` is `dumb`.
 
-Because `/bin/sh` points to Kyanite's init, MOTD scripts are executed
-with `/bin/brush`; they do not need a `#!/bin/sh` shebang.
+MOTD scripts are executed with `/bin/brush`, so they do not need a `#!/bin/sh` shebang.
 
-## Logo
+## Customize the logo
 
-Replace `/etc/kyanite/logo.txt` with your own pre-coloured text. For
-example, if `chafa` is installed:
+Replace `/etc/kyanite/logo.txt` with your own pre-coloured text.
 
-``` sh
+For example, if `chafa` is installed:
+
+```sh
 chafa --size=36x --colors=256 logo.png > /etc/kyanite/logo.txt
 ```
 
 ## Aliases and helper commands
 
-The default `.bashrc` includes a prompt, unlimited history, aliases, and
-helpers such as `extract` and `gacp`.
+The default `.bashrc` includes a prompt, history configuration, aliases and helper functions such as `extract` and `gacp`.
 
-Some commands referenced by aliases and helpers are not included in the
-minimal base. Install them when needed, for example:
+Some commands used by the helpers are installed separately. For example:
 
-``` sh
+```sh
 kpkg add tar git curl unzip
 ```
 
-See [kpkg documentation](kpkg.md) for package installation and
-management.
+See the [kpkg guide](kpkg.md) for package installation and management.
 
-## Environment variables
+## Environment
 
-The simplified PRoot launch example sets `HOME`, `USER`, `LOGNAME`,
-`TERM`, `COLORTERM`, `LANG` and `PATH` explicitly. A launcher may choose
-different values depending on the host terminal and its integration
-requirements.
+A launcher normally sets environment variables such as `HOME`, `USER`, `LOGNAME`, `TERM`, `LANG` and `PATH`. The exact values can vary depending on the terminal and host integration.
