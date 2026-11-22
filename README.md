@@ -1,72 +1,80 @@
+🇺🇸 English | [🇪🇸 Español](README.es.md) | [🇷🇺 Русский](README.ru.md) | [🇨🇳 简体中文](README.zh-CN.md)
+
 # Kyanite
 
-Kyanite is a lightweight Linux environment built around memory-safe Rust components. It combines a small base system with access to Debian's package ecosystem through `kpkg`.
-
-The goal is to make a Linux environment that is **small, comfortable to use and easy to manage**.
+Kyanite is a small Linux system that is easy to carry and easy to use. Its core tools are written in Rust, a programming language that helps avoid many common memory bugs. You can install thousands of extra programs from Debian with a single command.
 
 ![Kyanite login screen](docs/screenshot.png)
 
 [![Build Kyanite Rootfs](https://github.com/StringManolo/Kyanite/actions/workflows/build-rootfs.yml/badge.svg)](https://github.com/StringManolo/Kyanite/actions/workflows/build-rootfs.yml)
 
-## Why Kyanite?
+## In short
 
-Kyanite brings together a minimal base system and familiar Linux tools:
+- **Small:** a compact base system, quick to download and start.
+- **Safer by design:** the init system, package manager, shell and core commands are written in Rust.
+- **Lots of software:** `kpkg` installs programs from Debian's repositories.
+- **Familiar:** common commands and an interactive shell, ready to use.
+- **Runs as an app:** it does not replace your operating system. On Android it is a normal app; on Linux it runs inside a folder.
 
-- **Rust-based core:** the init system, package manager, shell and core utilities are written in Rust.
-- **Debian packages:** install software from Debian repositories using `kpkg`.
-- **Small base:** the root filesystem is designed to stay compact.
-- **Familiar environment:** use common commands and an interactive shell.
-- **Android app:** run Kyanite through a dedicated Android application.
+New to Linux? The [glossary](docs/glossary.md) explains the technical words used here.
 
-## What's included?
+## Get Kyanite
 
-| Component | Description |
-| --- | --- |
-| `kyanite-init` | Starts and manages the interactive shell |
-| [Brush](https://github.com/reubeno/brush) | Interactive shell |
-| [uutils coreutils](https://github.com/uutils/coreutils) | Common command-line utilities implemented in Rust |
-| `kpkg` | Package manager for Debian repositories |
-| glibc runtime | Runtime for dynamically linked Debian packages |
-| `vi` | Text editor |
+### On Android (easiest)
 
-For a closer look at how the components fit together, see the [architecture guide](docs/architecture.md).
+1. [**Download Kyanite for Android (.apk)**](https://github.com/StringManolo/KyaniteAndroid/releases/latest/download/Kyanite.apk)
+2. Open the downloaded file and install it (Android may ask you to allow installing apps from this source).
+3. Open the app and choose how to start Kyanite on the first screen.
 
-## Getting Kyanite
+More details in the [Android guide](docs/android.md). Source code: [KyaniteAndroid](https://github.com/StringManolo/KyaniteAndroid).
 
-### Android
+### On Linux
 
-Get Kyanite as an Android application, with an integrated Linux environment and terminal.
-
-[**Download Kyanite for Android (.apk)**](https://github.com/StringManolo/KyaniteAndroid/releases/latest/download/Kyanite.apk) · [Android source code and documentation](https://github.com/StringManolo/KyaniteAndroid)
-
-### Linux root filesystem
-
-Download a root filesystem archive from the [Kyanite Releases page](https://github.com/StringManolo/Kyanite/releases).
-
-Available architectures:
+Download a root filesystem archive from the [Releases page](https://github.com/StringManolo/Kyanite/releases). Two architectures are available:
 
 - `aarch64` (ARM64)
 - `x86_64` (AMD64)
 
-Each release includes an archive, its SHA256 checksum and an Ed25519 signature of that checksum.
+Each release includes the archive, its SHA256 checksum and a signature, so you can check that the download is genuine. Follow the [installation guide](docs/installation.md) step by step.
 
-See the [installation guide](docs/installation.md) for download, verification and setup instructions.
+## Your first steps
 
-## Getting started
+Once Kyanite is running, you can try a few basic commands:
 
-Once Kyanite is running, use `kpkg` to install software:
+```sh
+pwd        # show the folder you are in
+ls         # list the files in this folder
+cd /etc    # move to another folder
+```
+
+To install software, use `kpkg`:
 
 ```sh
 kpkg update
 kpkg add curl
 ```
 
-Explore the [usage guide](docs/usage.md) and [kpkg documentation](docs/kpkg.md) for more examples.
+The [usage guide](docs/usage.md) and the [kpkg guide](docs/kpkg.md) have more examples.
+
+## What is included?
+
+| Component | What it does |
+| --- | --- |
+| `kyanite-init` | Starts the system and opens the shell |
+| [Brush](https://github.com/reubeno/brush) | The shell: the program where you type commands |
+| [uutils coreutils](https://github.com/uutils/coreutils) | Everyday commands such as `ls` and `cp`, written in Rust |
+| `kpkg` | The package manager: installs and removes programs from Debian |
+| glibc runtime | Lets Debian programs run |
+| `vi` | A simple text editor |
+
+Want to know how the pieces fit together? Read the [architecture guide](docs/architecture.md).
 
 ## Documentation
 
 | Guide | What it covers |
 | --- | --- |
+| [Glossary](docs/glossary.md) | Technical words explained in plain language |
+| [Android guide](docs/android.md) | Using Kyanite on your phone |
 | [Installation](docs/installation.md) | Downloading, verifying and starting Kyanite |
 | [Usage](docs/usage.md) | Shell environment and customization |
 | [Package manager (`kpkg`)](docs/kpkg.md) | Commands, options and package management |
@@ -79,8 +87,8 @@ Explore the [usage guide](docs/usage.md) and [kpkg documentation](docs/kpkg.md) 
 
 ## Security
 
-Security is an important design goal. Read [SECURITY.md](SECURITY.md) for the threat model, implemented protections, known security gaps and vulnerability reporting instructions.
+Security is an important design goal. [SECURITY.md](SECURITY.md) (in English) describes the threat model, the protections already in place, known gaps and how to report a vulnerability.
 
 ## Contributing
 
-Kyanite is developed in the open. The [development guide](docs/development.md) describes the build workflow and gives pointers for working with the source code.
+Kyanite is developed in the open. The [development guide](docs/development.md) explains how to build the project and where to start.

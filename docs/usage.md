@@ -34,7 +34,7 @@ chmod -x /etc/update-motd.d/00-logo
 To add a static message:
 
 ```sh
-printf '%s\\n' 'Welcome to Kyanite' > /etc/motd
+printf '%s\n' 'Welcome to Kyanite' > /etc/motd
 ```
 
 To silence the MOTD for your login:
