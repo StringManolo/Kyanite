@@ -12,6 +12,11 @@ use std::time::{Duration, Instant};
 
 const SHELL_PATH: &str = "/bin/brush";
 
+/// Arranque real de una imagen x86_64 (init es PID 1 y el kernel dejo HOME=/): home de root.
+const X86_HOME: &str = "/root";
+/// PATH que se da al shell en ese caso, solo si el kernel no dejo ninguno definido.
+const X86_DEFAULT_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
 // ============================================================
 // CONFIGURACION
 // ============================================================
@@ -406,18 +411,64 @@ fn reclaim_tty() {
     }
 }
 
-fn start_shell(args: &[&str]) -> Result<Pid, Errno> {
+// ------------------------------------------------------------
+// ARRANQUE REAL x86_64 (imagen booteable)
+// ------------------------------------------------------------
+// Cuando el kernel arranca la imagen, init es el PID 1 y recibe un entorno minimo (HOME=/ y
+// TERM=linux). Brush, como shell de login, buscaria entonces ~/.bashrc y los perfiles en "/" en
+// vez de /root. Solo en ese caso (x86_64 + PID 1 + HOME=/) se prepara el entorno del shell.
+// En proot (init no es PID 1), en la VM aarch64 o con cualquier otro HOME no se cambia nada.
+
+/// Logica pura (testeable): true = arranque real x86_64 con el HOME por defecto del kernel.
+fn is_fresh_x86_boot(
+    arch_is_x86_64: bool,
+    is_pid1: bool,
+    home: Option<&str>,
+    root_home_exists: bool,
+) -> bool {
+    arch_is_x86_64 && is_pid1 && home == Some("/") && root_home_exists
+}
+
+fn needs_x86_boot_env(is_pid1: bool) -> bool {
+    let home = std::env::var("HOME").ok();
+    is_fresh_x86_boot(
+        cfg!(target_arch = "x86_64"),
+        is_pid1,
+        home.as_deref(),
+        std::path::Path::new(X86_HOME).is_dir(),
+    )
+}
+
+/// Variables que se anaden al entorno del shell en ese caso.
+fn x86_boot_env() -> Vec<(&'static str, String)> {
+    let mut env = vec![
+        ("HOME", X86_HOME.to_string()),
+        ("USER", "root".to_string()),
+        ("LOGNAME", "root".to_string()),
+    ];
+    if std::env::var_os("PATH").is_none() {
+        env.push(("PATH", X86_DEFAULT_PATH.to_string()));
+    }
+    env
+}
+
+fn start_shell(args: &[&str], x86_boot: bool) -> Result<Pid, Errno> {
     let _ = io::stdout().flush();
     let _ = io::stderr().flush();
+
+    // Se calcula antes del fork para no leer el entorno dentro del hijo.
+    let extra_env = if x86_boot { x86_boot_env() } else { Vec::new() };
 
     match unsafe { fork()? } {
         ForkResult::Child => {
             child_job_control(lacks_controlling_tty());
 
-            let error = Command::new(SHELL_PATH)
-                .args(args)
-                .env("SHELL", SHELL_PATH)
-                .exec();
+            let mut command = Command::new(SHELL_PATH);
+            command.args(args).env("SHELL", SHELL_PATH);
+            for (name, value) in &extra_env {
+                command.env(name, value);
+            }
+            let error = command.exec();
 
             log("========== EXEC FALLO ==========");
             log(&format!("Error: {}", error));
@@ -613,6 +664,14 @@ fn main() {
     debug("          KYANITE INIT");
     debug("========================================");
     debug(&format!("Init PID: {}", std::process::id()));
+
+    // Arranque real de una imagen x86_64: el kernel dejo HOME=/ (ver ARRANQUE REAL x86_64).
+    // En cualquier otro caso (proot, VM aarch64...) x86_boot es false y todo va como antes.
+    let x86_boot = needs_x86_boot_env(std::process::id() == 1);
+    if x86_boot {
+        let _ = std::env::set_current_dir(X86_HOME);
+        debug("arranque x86_64 con HOME=/: se usa HOME=/root");
+    }
     ignore_sigttou();
     if winsize_unknown() {
         autodetect_winsize();
@@ -638,7 +697,7 @@ fn main() {
         }
 
         let started = Instant::now();
-        let shell = match start_shell(mode.args) {
+        let shell = match start_shell(mode.args, x86_boot) {
             Ok(pid) => pid,
             Err(error) => {
                 log(&format!("FATAL: fork() fallo: {:?}", error));
@@ -710,6 +769,16 @@ mod tests {
         assert!(!wants_passthrough(&v(&["-il"]), false, true));
         assert!(!wants_passthrough(&v(&["-l"]), false, false));
         assert!(!wants_passthrough(&v(&["--login"]), false, true));
+    }
+
+    #[test]
+    fn x86_boot_fix_only_applies_to_a_fresh_x86_pid1() {
+        assert!(super::is_fresh_x86_boot(true, true, Some("/"), true));
+        assert!(!super::is_fresh_x86_boot(false, true, Some("/"), true)); // aarch64 (VM del movil)
+        assert!(!super::is_fresh_x86_boot(true, false, Some("/"), true)); // proot / uso como sh
+        assert!(!super::is_fresh_x86_boot(true, true, Some("/root"), true)); // HOME ya definido
+        assert!(!super::is_fresh_x86_boot(true, true, None, true));
+        assert!(!super::is_fresh_x86_boot(true, true, Some("/"), false)); // no existe /root
     }
 
     #[test]

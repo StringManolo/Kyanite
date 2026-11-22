@@ -52,10 +52,10 @@ jobs:
           mkdir rootfs
           echo "Ultima release: $(gh release view --repo "$REPO" --json tagName -q .tagName)"
           gh release download --repo "$REPO" --pattern '*x86_64*.tar.xz' --dir rootfs
-          gh release download --repo "$REPO" --pattern '*x86_64*.sha256*' --dir rootfs || true
+          gh release download --repo "$REPO" --pattern '*x86_64*.tar.xz.sha256' --dir rootfs || true
           [ "$(ls rootfs/*.tar.xz | wc -l)" = "1" ] || { echo "::error::Se esperaba exactamente un tar.xz x86_64"; ls rootfs; exit 1; }
           cd rootfs
-          if ls *.sha256* >/dev/null 2>&1; then sha256sum -c *.sha256*; else echo "::warning::No hay sha256, no se verifica"; fi
+          if ls *.sha256 >/dev/null 2>&1; then sha256sum -c *.sha256; else echo "::warning::No hay sha256, no se verifica"; fi
 
       - name: Kernel, initramfs y capa del instalador (Alpine)
         run: |
@@ -201,6 +201,7 @@ jobs:
       - name: Tests - imagen de disco (BIOS/UEFI x SATA/USB)
         if: ${{ !cancelled() && steps.img.outcome == 'success' }}
         run: |
+          set +e   # el shell por defecto de Actions es `bash -e`; aqui los fallos se gestionan a mano
           set -uo pipefail
           source image/lib-test.sh
           enable_kvm
@@ -219,9 +220,28 @@ jobs:
           done
           exit 0
 
+      - name: Tests - humo (vim --version) con CPU qemu64 y max
+        if: ${{ !cancelled() && steps.img.outcome == 'success' }}
+        run: |
+          set +e   # el shell por defecto de Actions es `bash -e`; aqui los fallos se gestionan a mano
+          set -uo pipefail
+          source image/lib-test.sh
+          enable_kvm
+          make_smoke_image kyanite-x86_64.img test-smoke.img
+          # CPU basica en emulacion pura (como QEMU sin -cpu dentro de proot en el movil)
+          VM_ACCEL=tcg VM_CPU=qemu64 LIMIT=300 run_vm "smoke-qemu64-tcg" 'KYANITE-SMOKE vim rc=0' 0 \
+            -drive if=none,id=d0,file=test-smoke.img,format=raw,snapshot=on \
+            -device ide-hd,drive=d0,bus=ide.0,bootindex=0 || true
+          # CPU completa (KVM si el runner lo permite)
+          run_vm "smoke-max" 'KYANITE-SMOKE vim rc=0' 0 \
+            -drive if=none,id=d0,file=test-smoke.img,format=raw,snapshot=on \
+            -device ide-hd,drive=d0,bus=ide.0,bootindex=0 || true
+          exit 0
+
       - name: Tests - ISO live (BIOS/UEFI x CD/USB)
         if: ${{ !cancelled() && steps.iso.outcome == 'success' }}
         run: |
+          set +e   # el shell por defecto de Actions es `bash -e`; aqui los fallos se gestionan a mano
           set -uo pipefail
           source image/lib-test.sh
           enable_kvm
@@ -238,6 +258,7 @@ jobs:
       - name: Tests - instalador (live -> disco -> arranque del disco instalado)
         if: ${{ !cancelled() && steps.iso.outcome == 'success' }}
         run: |
+          set +e   # el shell por defecto de Actions es `bash -e`; aqui los fallos se gestionan a mano
           set -uo pipefail
           source image/lib-test.sh
           enable_kvm
