@@ -2,38 +2,8 @@
 
 ### Investigate
 - Check why x86 build is double the size of arm
-- Qemu error:
-```
-[dlc] rootfs channel: /dev/vport1p1
-[dlc] receiving rootfs into RAM...
-[dlc] rootfs ready, switching root. Tip: run 'stty rows N cols M' to match your screen.
-[dlc] starting /bin/sh (this is PID 1: leaving it powers the VM off)
-[init] tcsetpgrp(0, 166) FALLO: Not a tty (os error 25)
-
-       /\
-      /  \
-     / /\ \
-    / /  \ \     K Y A N I T E
-    \ \  / /     -------------
-     \ \/ /      Secure. Light.
-      \  /       Comfortable.
-       \/
-
-  Kyanite 7a5a906 (aarch64)
-
-  Kernel    Linux 6.12.107+deb13-arm64
-  Uptime    0h 0m
-  Memory    140 MiB / 464 MiB
-  Disk      114M used of 419M (28%)
-
-  Packages  kpkg update && kpkg add <package>
-  Editor    vi
-  Project   https://github.com/StringManolo/Kyanite
-
-  Edit /etc/update-motd.d/ or /etc/motd to customize. Silence with: touch ~/.hushlogin
-root@kyanite:~#
-```
-- Also fix tty on qemu
+- ~~Qemu error: tcsetpgrp(0, 166) FALLO: Not a tty (os error 25)~~
+- ~~Also fix tty on qemu~~
 
 ### Security
 - Check for env replacement for a Rust version 
@@ -45,7 +15,7 @@ root@kyanite:~#
 - Check for new features
 
 ### Quality Of Life
-- Add better logs to init
+- Add better logs to init (translate to english too)
 - ~~Add preconfigured scripts~~
 - ~~Add MOTD~~ (Improve MOTD)
 - Add ~~custom PS1 + alias +~~ good default brush config (.bashrc)
@@ -58,21 +28,22 @@ root@kyanite:~#
 - Recycle bin
 - CloudBackups
 - Swap Kernel + Check Rufus installs
-- Patch apps that work but they think they don't like nmap
+- Patch apps that work but they think they don't like nmap (using hook)
 - Include support for X11?
-- Test different vimrc configs and themes (exclude from vim-tiny?)
+- ~~Test different vimrc configs and themes (exclude from vim-tiny?)~~
 - translate SECURITY.md
 - Test all typical software (to check for missing hooks) Tested:
   - npm
   - python
   - curl
+  - git
+  - gh
 - Pending:
   - tor
   - gcc, make and family
-  - git, gh
 
 ### Stability
-- Test on Qemu
+- ~~Test on Qemu~~
 - Test x86 (use proot on github actions to test??)
 - Test on udocker
 - Test on proot distro (pr to termux distros?)
