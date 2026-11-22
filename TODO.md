@@ -4,6 +4,7 @@
 - Check why x86 build is double the size of arm
 - ~~Qemu error: tcsetpgrp(0, 166) FALLO: Not a tty (os error 25)~~
 - ~~Also fix tty on qemu~~
+- Upgrade don't apply cleanly to init component (add option to 'force' to don't generate '-new' files for core components when specified on the update patch)
 
 ### Security
 - Check for env replacement for a Rust version 
@@ -63,3 +64,8 @@
 
 ### Other
 - Use as base to new security based distro (based on SOSCW but made with a single install script that download the lastest versions and patches them. Every tool has its own script and they are all called from a main script -this should be done in actions to ship the tools.tar.xz on demand?-)
+- Webpage (githubpages and stringmanolo.qzz.io as a download webpage)
+- Demo video
+- Sign the apk
+- Fix fastlane and apk to playstore (paid)
+- Apk to fdroid free
