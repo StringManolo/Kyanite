@@ -266,10 +266,22 @@ fn ignore_sigttou() {
     }
 }
 
-/// true = arranque como PID 1 (VM): no hay terminal de control ni tamano de ventana.
-/// En proot (PID != 1) el pty de la app ya trae ambas cosas y no se toca nada.
-fn is_vm_boot() -> bool {
-    std::process::id() == 1
+/// true = stdin es un tty pero este proceso no tiene terminal de control (arranque VM).
+/// tcgetpgrp() da ENOTTY cuando el tty no es el terminal de control del proceso que llama.
+/// En proot el pty de la app ya es el terminal de control: da false y no se toca nada.
+fn lacks_controlling_tty() -> bool {
+    unsafe { libc::isatty(0) == 1 && libc::tcgetpgrp(0) < 0 }
+}
+
+/// true = el tty no conoce su tamano (consola serie en la VM: 0 filas x 0 columnas).
+fn winsize_unknown() -> bool {
+    unsafe {
+        if libc::isatty(0) != 1 {
+            return false;
+        }
+        let mut ws: libc::winsize = std::mem::zeroed();
+        libc::ioctl(0, libc::TIOCGWINSZ as _, &mut ws) != 0 || ws.ws_row == 0 || ws.ws_col == 0
+    }
 }
 
 /// Se ejecuta en el hijo ya tras setsid(). Convierte el tty de stdin en terminal de control.
@@ -400,7 +412,7 @@ fn start_shell(args: &[&str]) -> Result<Pid, Errno> {
 
     match unsafe { fork()? } {
         ForkResult::Child => {
-            child_job_control(is_vm_boot());
+            child_job_control(lacks_controlling_tty());
 
             let error = Command::new(SHELL_PATH)
                 .args(args)
@@ -602,7 +614,7 @@ fn main() {
     debug("========================================");
     debug(&format!("Init PID: {}", std::process::id()));
     ignore_sigttou();
-    if is_vm_boot() {
+    if winsize_unknown() {
         autodetect_winsize();
     }
 
@@ -653,7 +665,7 @@ fn main() {
             }
         };
 
-        if !is_vm_boot() {
+        if !lacks_controlling_tty() {
             reclaim_tty();
         }
 
