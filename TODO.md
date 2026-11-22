@@ -30,6 +30,7 @@
 - Recycle bin
 - Fix KyaniteAndroid defaults to autoinstall and autostart the system by default in the first run (after apk install), to help non tech users.
 - CloudBackups
+- Remove spanish from init and build workflow
 - Swap Kernel + Check Rufus installs
 - Patch apps that work but they think they don't like nmap (using hook)
 - Include support for X11?

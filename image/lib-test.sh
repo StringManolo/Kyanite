@@ -5,7 +5,7 @@
 
 SHOTS_ROOT=${SHOTS_ROOT:-$PWD/shots}
 LIMIT=${LIMIT:-150}         # segundos maximos por caso
-INTERVAL=${INTERVAL:-3}     # segundos entre capturas
+INTERVAL=${INTERVAL:-1}     # segundos entre capturas
 mkdir -p "$SHOTS_ROOT"
 OVMF=""
 for f in /usr/share/ovmf/OVMF.fd /usr/share/OVMF/OVMF.fd; do
@@ -39,12 +39,15 @@ set_serial_entry() {
   sudo losetup -d "$loop"
 }
 
-# matches LOG REGEX: ignora las lineas de nuestros marcadores salvo que EXPECT_RAW=1
+# matches LOG REGEX: solo cuenta lo que sale DESPUES de que arranque el kernel ("Linux version").
+# En UEFI, OVMF copia el menu de GRUB ("Kyanite", "Kyanite (consola serie)") a la consola serie y
+# daria falsos positivos. Ignora ademas nuestras lineas de marcadores salvo con EXPECT_RAW=1.
+# (grep sin -q a proposito: con pipefail, un grep -q que sale antes provoca SIGPIPE y falsos negativos.)
 matches() {
   if [ "${EXPECT_RAW:-0}" = 1 ]; then
-    grep -qaiE "$2" "$1"
+    LC_ALL=C sed -n '/Linux version/,$p' "$1" | grep -aiE "$2" >/dev/null
   else
-    grep -av 'KYANITE-\(LIVE\|INSTALL\)' "$1" | grep -qaiE "$2"
+    LC_ALL=C sed -n '/Linux version/,$p' "$1" | grep -av 'KYANITE-\(LIVE\|INSTALL\)' | grep -aiE "$2" >/dev/null
   fi
 }
 
