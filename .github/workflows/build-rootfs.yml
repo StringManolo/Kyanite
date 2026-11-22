@@ -15,6 +15,14 @@ jobs:
     name: Build Kyanite for ${{ matrix.arch }}
     runs-on: ubuntu-latest
 
+    # Linker y flags de Rust para cada target musl (aplican a todos los pasos).
+    env:
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
+      CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_LINKER: arm-linux-gnueabihf-gcc
+      CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
+
     strategy:
       matrix:
         include:
@@ -24,6 +32,9 @@ jobs:
           - arch: x86_64
             rust_target: x86_64-unknown-linux-musl
             debian_arch: amd64
+          - arch: armv7
+            rust_target: armv7-unknown-linux-musleabihf
+            debian_arch: armhf
 
     steps:
       # ============================================================
@@ -68,6 +79,7 @@ jobs:
             musl-tools \
             build-essential \
             gcc-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabihf \
             curl \
             binutils
 
@@ -76,10 +88,6 @@ jobs:
       # ============================================================
 
       - name: Compile Kyanite Init (PID 1)
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
         run: |
           cd init
           cargo build --release --target ${{ matrix.rust_target }}
@@ -90,10 +98,6 @@ jobs:
       # ============================================================
 
       - name: Compile kpkg (Secure Package Manager)
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
         run: |
           cd kpkg
           cargo build --release --target ${{ matrix.rust_target }}
@@ -104,10 +108,6 @@ jobs:
       # ============================================================
 
       - name: Build and Install Brush Shell
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
         run: |
           cargo install brush-shell \
             --target ${{ matrix.rust_target }} \
@@ -119,9 +119,6 @@ jobs:
 
       - name: Build uutils coreutils (Rust)
         env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C relocation-model=static -C link-arg=-no-pie"
           CARGO_PROFILE_RELEASE_STRIP: "true"
         run: |
           # Un solo binario multicall. Para fijar version: --version X.Y.Z
@@ -255,6 +252,10 @@ jobs:
               LIB_PREFIX="aarch64-linux-gnu"
               LOADER_NAME="ld-linux-aarch64.so.1"
               ;;
+            armhf)
+              LIB_PREFIX="arm-linux-gnueabihf"
+              LOADER_NAME="ld-linux-armhf.so.3"
+              ;;
             *)
               echo "ERROR: Unsupported architecture: $DEBIAN_ARCH"
               exit 1
@@ -267,8 +268,26 @@ jobs:
 
           echo "Downloading glibc runtime and vi ($DEBIAN_ARCH)..."
 
-          if [ "$DEBIAN_ARCH" = "arm64" ]; then
-            sudo dpkg --add-architecture arm64
+          if [ "$DEBIAN_ARCH" != "amd64" ]; then
+            sudo dpkg --add-architecture "$DEBIAN_ARCH"
+            CODENAME="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+
+            # El mirror principal de Ubuntu solo sirve amd64: se limita para
+            # que apt no pida arm64/armhf alli (daria 404).
+            if [ -f /etc/apt/sources.list.d/ubuntu.sources ] \
+               && ! grep -q '^Architectures:' /etc/apt/sources.list.d/ubuntu.sources; then
+              sudo sed -i '/^Types: deb/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
+            fi
+
+            # Los paquetes arm/arm64 de Ubuntu viven en ports.ubuntu.com
+            sudo tee /etc/apt/sources.list.d/ports.sources > /dev/null <<EOF
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports
+          Suites: $CODENAME $CODENAME-updates
+          Components: main universe
+          Architectures: arm64 armhf
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          EOF
             sudo apt-get update -qq
           fi
 
@@ -282,17 +301,18 @@ jobs:
               libacl1 libselinux1 libpcre2-8-0 libtinfo6 \
               ncurses-base
           else
-            apt-get download \
-              libc6:arm64 \
-              libgcc-s1:arm64 \
-              gnu-coreutils:arm64
-            apt-get download \
-              vim-tiny:arm64 \
-              libacl1:arm64 libselinux1:arm64 libpcre2-8-0:arm64 libtinfo6:arm64
-            # Architecture-independent packages: try the :arm64 form first,
-            # fall back to the plain name.
+            A="$DEBIAN_ARCH"
+            apt-get download "libc6:$A" "libgcc-s1:$A"
+            apt-get download "gnu-coreutils:$A" || apt-get download "coreutils:$A"
+            apt-get download "vim-tiny:$A" "libpcre2-8-0:$A" "libtinfo6:$A"
+            # armhf pasó por la transicion t64: algunos paquetes cambian de nombre
+            for lib in libacl1 libselinux1; do
+              apt-get download "${lib}:$A" || apt-get download "${lib}t64:$A"
+            done
+            # Paquetes independientes de arquitectura: primero la forma :arch,
+            # si no, el nombre simple.
             for pkg in vim-common ncurses-base; do
-              apt-get download "$pkg:arm64" || apt-get download "$pkg"
+              apt-get download "$pkg:$A" || apt-get download "$pkg"
             done
           fi
 
@@ -403,13 +423,15 @@ jobs:
 
           fi
 
+          # (armhf pide /lib/ld-linux-armhf.so.3, que ya queda instalado en 7.7)
+
           # --------------------------------------------------------
           # 7.9 Install env
           # --------------------------------------------------------
 
           echo "Installing env..."
 
-          if [ "$DEBIAN_ARCH" = "arm64" ]; then
+          if [ "$DEBIAN_ARCH" != "amd64" ]; then
 
             if [ -f usr/bin/env ]; then
               cp -L usr/bin/env "../$ARCH_DIR/usr/bin/env"
@@ -418,7 +440,7 @@ jobs:
               cp -L usr/bin/gnuenv "../$ARCH_DIR/usr/bin/env"
 
             else
-              echo "ERROR: env/gnuenv not found in gnu-coreutils:arm64"
+              echo "ERROR: env/gnuenv not found in the coreutils package ($DEBIAN_ARCH)"
               ls -la usr/bin/ | head -50
               exit 1
             fi
@@ -462,11 +484,13 @@ jobs:
 
           chmod 1777 "$ARCH_DIR/tmp"
 
-          # Paquetes que kpkg debe dar por instalados (ya vienen en este rootfs)
+          # Paquetes que kpkg debe dar por instalados (ya vienen en este rootfs).
+          # Se incluyen tambien los nombres t64 (armhf y Debian/Ubuntu recientes).
           mkdir -p "$ARCH_DIR/etc/kpkg"
           printf '%s\n' \
             libc6 libgcc-s1 coreutils \
             vim-tiny vim-common libacl1 libselinux1 libpcre2-8-0 libtinfo6 ncurses-base \
+            libacl1t64 libselinux1t64 \
             > "$ARCH_DIR/etc/kpkg/assume-installed"
 
           # --------------------------------------------------------

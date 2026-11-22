@@ -34,6 +34,7 @@
 - Include support for X11?
 - ~~Test different vimrc configs and themes (exclude from vim-tiny?)~~
 - translate SECURITY.md
+- Add support for arm32
 - Full KyaniteAndroid translation to the 4 supported languages)
 - Test all typical software (to check for missing hooks) Tested:
   - npm
@@ -63,6 +64,11 @@
 - Inspect coreutils (11MB) (replacement??)
 
 - Slowly replace or fork
+
+### Visuals and Experience
+- Add welcome.txt in /root
+- Add manual.txt in different languages in /root
+
 
 ### Other
 - Use as base to new security based distro (based on SOSCW but made with a single install script that download the lastest versions and patches them. Every tool has its own script and they are all called from a main script -this should be done in actions to ship the tools.tar.xz on demand?-)

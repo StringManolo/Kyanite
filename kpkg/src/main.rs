@@ -97,6 +97,8 @@ impl Ctx {
 fn default_arch() -> String {
     if cfg!(target_arch = "aarch64") {
         "arm64".to_string()
+    } else if cfg!(target_arch = "arm") {
+        "armhf".to_string()
     } else {
         "amd64".to_string()
     }
@@ -3163,6 +3165,7 @@ fn base_asset_arch(arch: &str) -> Res<&'static str> {
     match arch {
         "arm64" => Ok("aarch64"),
         "amd64" => Ok("x86_64"),
+        "armhf" => Ok("armv7"),
         o => Err(format!("there is no Kyanite release for architecture '{}'", o).into()),
     }
 }
@@ -3795,7 +3798,7 @@ fn print_help_apk() {
     println!("  -f, --force            Overwrite unowned/foreign files, ignore reverse dependencies");
     println!("  -y, --yes              Do not ask for confirmation (only asked in apt mode)");
     println!("      --root <dir>       Operate on another root (default: /)");
-    println!("      --arch <arch>      Debian architecture (default: arm64 or amd64, per build)");
+    println!("      --arch <arch>      Debian architecture (default: arm64, armhf or amd64, per build)");
     println!("      --mirror <url>     Repository mirror (default: {})", DEFAULT_MIRROR);
     println!("      --security-mirror <url>  Security mirror (default: {})", DEFAULT_SECURITY_MIRROR);
     println!("      --suite <name>     Debian suite (default: {})", DEFAULT_SUITE);
