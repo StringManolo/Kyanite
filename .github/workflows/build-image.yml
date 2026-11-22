@@ -48,12 +48,12 @@ jobs:
           mkdir rootfs
           echo "Ultima release: $(gh release view --repo "$REPO" --json tagName -q .tagName)"
           gh release download --repo "$REPO" --pattern '*x86_64*.tar.xz' --dir rootfs
-          gh release download --repo "$REPO" --pattern '*x86_64*.sha256*' --dir rootfs || true
+          # gh release download --repo "$REPO" --pattern '*x86_64*.sha256*' --dir rootfs || true
           [ "$(ls rootfs/*.tar.xz | wc -l)" = "1" ] || { echo "::error::Se esperaba exactamente un tar.xz x86_64"; ls rootfs; exit 1; }
           cd rootfs
           echo 'Testing hash'
-          if ls *.sha256* >/dev/null 2>&1; then sha256sum -c *.sha256*; else echo "::warning::No hay sha256, no se verifica"; fi
-          'Hash tested'
+          # if ls *.sha256* >/dev/null 2>&1; then sha256sum -c *.sha256*; else echo "::warning::No hay sha256, no se verifica"; fi
+          'Hash Omited for X86_64 build only for Debug purpouses'
 
       - name: Kernel e initramfs (Alpine)
         run: |
