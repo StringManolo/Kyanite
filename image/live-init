@@ -1,0 +1,115 @@
+#!/bin/sh
+# Kyanite live - /init del initramfs (busybox ash).
+# 1) Busca el medio (CD/USB/ISO) que contiene /kyanite/rootfs.squashfs
+# 2) Monta rootfs + overlay en RAM y hace switch_root a /sbin/init de Kyanite
+# Con kyanite.autoinstall=auto|/dev/xxx en la cmdline: instala en disco sin preguntar y apaga.
+
+export PATH=/sbin:/bin:/usr/sbin:/usr/bin
+/bin/busybox --install -s /bin 2>/dev/null
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /run /tmp /mnt/media /mnt/rootfs /mnt/installer /mnt/rw /mnt/new
+
+log() { echo "KYANITE-LIVE: $*"; }
+emergency() {
+  echo "KYANITE-LIVE: ERROR: $*"
+  echo "Abriendo una shell de emergencia."
+  exec setsid cttyhack /bin/sh
+}
+
+AUTO=""
+for p in $(cat /proc/cmdline); do
+  case "$p" in
+    kyanite.autoinstall=*) AUTO="${p#kyanite.autoinstall=}" ;;
+  esac
+done
+
+coldplug() {
+  find /sys -name modalias -type f -print0 2>/dev/null | xargs -0 cat 2>/dev/null | sort -u | xargs modprobe -ab 2>/dev/null
+}
+
+log "cargando drivers"
+for m in loop squashfs overlay isofs cdrom sr_mod sd_mod usb_storage uas ahci libahci \
+         ata_piix ata_generic nvme virtio_blk virtio_pci virtio_scsi mmc_block ext4 vfat \
+         nls_cp437 nls_iso8859_1 nls_utf8; do
+  modprobe "$m" 2>/dev/null
+done
+coldplug
+
+# --- buscar el medio -------------------------------------------------------
+try_dev() {
+  dev=$1
+  [ -b "$dev" ] || return 1
+  for fs in iso9660 auto; do
+    if mount -t "$fs" -o ro "$dev" /mnt/media 2>/dev/null; then
+      [ -f /mnt/media/kyanite/rootfs.squashfs ] && return 0
+      umount /mnt/media
+    fi
+  done
+  return 1
+}
+
+MEDIA=""
+n=0
+while [ "$n" -lt 40 ] && [ -z "$MEDIA" ]; do
+  for dev in /dev/sr* /dev/sd* /dev/vd* /dev/nvme*n* /dev/mmcblk* /dev/xvd*; do
+    if try_dev "$dev"; then MEDIA=$dev; break; fi
+  done
+  [ -n "$MEDIA" ] && break
+  n=$((n + 1))
+  [ $((n % 5)) -eq 0 ] && coldplug
+  sleep 1
+done
+[ -n "$MEDIA" ] || emergency "no encuentro el medio (busco /kyanite/rootfs.squashfs)"
+log "medio: $MEDIA"
+
+mount -t squashfs -o loop,ro /mnt/media/kyanite/rootfs.squashfs /mnt/rootfs \
+  || emergency "no puedo montar rootfs.squashfs"
+mount -t squashfs -o loop,ro /mnt/media/kyanite/installer.squashfs /mnt/installer \
+  || log "aviso: sin capa de instalador"
+
+# --- instalacion automatica (CI) -------------------------------------------
+if [ -n "$AUTO" ]; then
+  log "autoinstall -> $AUTO"
+  K_INSTALLER=/mnt/installer K_ROOTFS=/mnt/rootfs K_MEDIUM=/mnt/media \
+    sh /mnt/installer/usr/local/sbin/kyanite-install-wrapper --auto "$AUTO"
+  log "el instalador termino con codigo $?"
+  sync
+  poweroff -f
+fi
+
+# --- live normal: overlay en RAM ---------------------------------------------
+mount -t tmpfs -o mode=0755 tmpfs /mnt/rw
+mkdir -p /mnt/rw/upper /mnt/rw/work
+mount -t overlay overlay \
+  -o lowerdir=/mnt/rootfs,upperdir=/mnt/rw/upper,workdir=/mnt/rw/work /mnt/new \
+  || emergency "no puedo montar el overlay"
+
+mkdir -p /mnt/new/proc /mnt/new/sys /mnt/new/dev /mnt/new/run /mnt/new/tmp \
+  /mnt/new/live/medium /mnt/new/live/rootfs /mnt/new/live/installer /mnt/new/live/rw
+
+# lanzador del instalador (solo existe en el live, no en el sistema instalado)
+mkdir -p /mnt/new/usr/local/sbin
+cat > /mnt/new/usr/local/sbin/kyanite-install <<'EOF'
+#!/live/installer/bin/busybox.static sh
+exec /live/installer/bin/busybox.static sh /live/installer/usr/local/sbin/kyanite-install-wrapper "$@"
+EOF
+chmod 755 /mnt/new/usr/local/sbin/kyanite-install
+mkdir -p /mnt/new/sbin 2>/dev/null
+ln -sf /usr/local/sbin/kyanite-install /mnt/new/sbin/kyanite-install 2>/dev/null
+
+log "para instalar en el disco duro ejecuta: /usr/local/sbin/kyanite-install"
+log "switch_root"
+
+mount --move /mnt/media /mnt/new/live/medium
+mount --move /mnt/rootfs /mnt/new/live/rootfs
+grep -q ' /mnt/installer ' /proc/mounts && mount --move /mnt/installer /mnt/new/live/installer
+mount --move /mnt/rw /mnt/new/live/rw
+mount --move /proc /mnt/new/proc
+mount --move /sys /mnt/new/sys
+mount --move /dev /mnt/new/dev
+
+exec switch_root /mnt/new /sbin/init
+emergency "switch_root fallo"

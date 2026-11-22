@@ -1,8 +1,9 @@
 name: Build bootable x86_64 image (manual)
 
-# Solo se ejecuta a mano: Actions -> "Build bootable x86_64 image (manual)" -> Run workflow.
-# Toma el rootfs x86_64 de la ultima release publica, monta una imagen de disco
-# (BIOS + UEFI, GPT) con kernel de Alpine y la prueba en QEMU (BIOS/UEFI x SATA/USB).
+# Solo manual:  gh workflow run build-image.yml
+# Genera: imagen de disco (.img/.vdi/.vmdk), ISO live BIOS+UEFI con instalador,
+# y prueba todo en QEMU con capturas de pantalla cada pocos segundos.
+# Los scripts auxiliares viven en image/ (ver README al pie del resumen del job).
 on:
   workflow_dispatch:
     inputs:
@@ -12,13 +13,13 @@ on:
         options: [lts, virt]
         default: lts
       image_size_mb:
-        description: "Tamano de la imagen en MB"
-        default: "1536"
+        description: "Tamano de la imagen de disco en MB"
+        default: "1024"
       expect:
-        description: "Regex (sin mayusculas) que debe salir por consola serie cuando Kyanite arranca"
+        description: "Regex (sin mayusculas) que debe imprimir Kyanite por consola serie al arrancar"
         default: "kyanite"
       release_tag:
-        description: "Opcional: tag de una release existente donde subir un .zip con las imagenes (vacio = no publicar)"
+        description: "Opcional: tag de una release existente donde subir un .zip (vacio = no publicar)"
         default: ""
 
 permissions:
@@ -27,7 +28,7 @@ permissions:
 jobs:
   image:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
@@ -36,11 +37,14 @@ jobs:
       EXPECT: ${{ inputs.expect }}
       RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Instalar herramientas
         run: |
           sudo apt-get update
           sudo apt-get install -y grub2-common grub-pc-bin grub-efi-amd64-bin \
-            gdisk dosfstools e2fsprogs qemu-system-x86 qemu-utils ovmf zip
+            gdisk dosfstools e2fsprogs squashfs-tools xorriso mtools \
+            qemu-system-x86 qemu-utils ovmf imagemagick fonts-dejavu-core zip
 
       - name: Descargar rootfs x86_64 de la ultima release
         run: |
@@ -48,29 +52,47 @@ jobs:
           mkdir rootfs
           echo "Ultima release: $(gh release view --repo "$REPO" --json tagName -q .tagName)"
           gh release download --repo "$REPO" --pattern '*x86_64*.tar.xz' --dir rootfs
-          # gh release download --repo "$REPO" --pattern '*x86_64*.sha256*' --dir rootfs || true
+          gh release download --repo "$REPO" --pattern '*x86_64*.sha256*' --dir rootfs || true
           [ "$(ls rootfs/*.tar.xz | wc -l)" = "1" ] || { echo "::error::Se esperaba exactamente un tar.xz x86_64"; ls rootfs; exit 1; }
           cd rootfs
-          echo 'Testing hash'
-          # if ls *.sha256* >/dev/null 2>&1; then sha256sum -c *.sha256*; else echo "::warning::No hay sha256, no se verifica"; fi
-          echo 'Hash Omited for X86_64 build only for Debug purpouses'
+          if ls *.sha256* >/dev/null 2>&1; then sha256sum -c *.sha256*; else echo "::warning::No hay sha256, no se verifica"; fi
 
-      - name: Kernel e initramfs (Alpine)
+      - name: Kernel, initramfs y capa del instalador (Alpine)
         run: |
           set -euo pipefail
           mkdir -p kernel-out
-          docker run --rm -e FLAVOR -v "$PWD/kernel-out:/out" alpine:3 sh -eu -c '
-            apk add --no-cache "linux-$FLAVOR" mkinitfs
-            KVER=$(ls /lib/modules | head -n1)
-            echo "features=\"base ata ide scsi usb virtio ext4 nvme\"" > /etc/mkinitfs/mkinitfs.conf
-            mkinitfs -b / -o /out/initramfs "$KVER"
-            cp "/boot/vmlinuz-$FLAVOR" /out/vmlinuz
-            mkdir -p /out/modules
-            cp -a "/lib/modules/$KVER" /out/modules/
+          docker run --rm -e FLAVOR -v "$PWD/kernel-out:/out" -v "$PWD/image:/image:ro" \
+            alpine:3 sh /image/alpine-kernel.sh
+          docker run --name kyinst alpine:3 sh -eu -c '
+            apk add --no-cache busybox-static e2fsprogs dosfstools sgdisk grub grub-bios grub-efi >/dev/null
+            mkdir -p /src/rootfs /src/medium /target /mnt/esp /lib/modules /tmp /run /usr/local/bin /usr/local/sbin
           '
+          sudo mkdir -p stage/installer
+          docker export kyinst | sudo tar -x -C stage/installer --numeric-owner
+          docker rm kyinst >/dev/null
+          sudo install -m 755 image/kyanite-install.sh stage/installer/usr/local/bin/kyanite-install.sh
+          sudo install -m 755 image/installer-wrapper.sh stage/installer/usr/local/sbin/kyanite-install-wrapper
           ls -lh kernel-out
 
+      - name: Preparar el arbol del rootfs
+        run: |
+          set -euo pipefail
+          sudo mkdir -p stage/root
+          sudo tar -xpf rootfs/*.tar.xz -C stage/root --numeric-owner
+          if ! sudo test -e stage/root/sbin/init && ! sudo test -L stage/root/sbin/init; then
+            echo "::error::El rootfs no tiene /sbin/init en la raiz del tar (hay un directorio superior?)"
+            sudo ls -la stage/root
+            exit 1
+          fi
+          sudo mkdir -p stage/root/proc stage/root/sys stage/root/dev stage/root/run stage/root/tmp stage/root/mnt
+          # modulos del kernel dentro del rootfs (para modprobe despues del arranque)
+          if sudo test -L stage/root/lib; then MODDIR=stage/root/usr/lib/modules; else MODDIR=stage/root/lib/modules; fi
+          sudo mkdir -p "$MODDIR"
+          sudo cp -a kernel-out/modules/. "$MODDIR"/
+          sudo du -sh stage/root stage/installer
+
       - name: Construir imagen de disco (GPT, BIOS + UEFI)
+        id: img
         run: |
           set -euo pipefail
           IMG=kyanite-x86_64.img
@@ -95,24 +117,12 @@ jobs:
           sudo mount "${LOOP}p3" mnt/root
           sudo mount "${LOOP}p2" mnt/esp
 
-          # rootfs
-          sudo tar -xpf rootfs/*.tar.xz -C mnt/root --numeric-owner
-          if [ ! -e mnt/root/sbin/init ] && [ ! -L mnt/root/sbin/init ]; then
-            echo "::error::El rootfs no tiene /sbin/init en la raiz del tar (hay un directorio superior?)"
-            ls -la mnt/root
-            exit 1
-          fi
-          sudo mkdir -p mnt/root/proc mnt/root/sys mnt/root/dev mnt/root/run mnt/root/tmp mnt/root/mnt
+          sudo cp -a stage/root/. mnt/root/
 
-          # modulos del kernel dentro del rootfs (para modprobe despues del arranque)
-          if [ -L mnt/root/lib ]; then MODDIR=mnt/root/usr/lib/modules; else MODDIR=mnt/root/lib/modules; fi
-          sudo mkdir -p "$MODDIR"
-          sudo cp -a kernel-out/modules/* "$MODDIR"/
-
-          # kernel + initramfs + grub en la ESP
           sudo mkdir -p mnt/esp/boot/grub
           sudo cp kernel-out/vmlinuz mnt/esp/vmlinuz
           sudo cp kernel-out/initramfs mnt/esp/initramfs
+          # OJO: mismo grub.cfg que genera image/kyanite-install.sh (write_grub_cfg); mantenerlos iguales
           sudo tee mnt/esp/boot/grub/grub.cfg >/dev/null <<EOF
           set timeout=3
           load_env
@@ -138,90 +148,152 @@ jobs:
           sudo losetup -d "$LOOP"
           trap - EXIT
 
-          # formatos para VirtualBox y VMware
           qemu-img convert -f raw -O vdi  "$IMG" kyanite-x86_64.vdi
           qemu-img convert -f raw -O vmdk "$IMG" kyanite-x86_64.vmdk
 
           cat > README-WINDOWS.txt <<'EOF'
-          Kyanite x86_64 - imagen booteable (BIOS y UEFI, Secure Boot desactivado)
+          Kyanite x86_64 (BIOS y UEFI; con Secure Boot desactivado)
 
-          USB: Rufus -> Seleccionar kyanite-x86_64.img -> modo "Imagen DD". Arrancar el PC desde el USB.
-          VirtualBox: Nueva VM (Linux, Other 64-bit), usar disco existente kyanite-x86_64.vdi. UEFI: activar "Habilitar EFI".
-          VMware: Nueva VM, usar disco existente kyanite-x86_64.vmdk.
+          kyanite-x86_64-live.iso  -> Live. USB: Rufus, modo "Imagen DD". VirtualBox/VMware: montarla como CD.
+                                      Desde el live, ejecuta /usr/local/sbin/kyanite-install para instalar en el disco duro.
+          kyanite-x86_64.img/.vdi/.vmdk -> Sistema ya instalado en un disco virtual (VirtualBox: .vdi, VMware: .vmdk,
+                                      USB: .img con Rufus en modo DD).
           EOF
           ls -lh kyanite-x86_64.*
 
-      - name: Probar arranque en QEMU (BIOS/UEFI x SATA/USB)
+      - name: Construir ISO live (+ variantes de prueba)
+        id: iso
+        run: |
+          set -euo pipefail
+          mkdir -p isodir/boot/grub isodir/kyanite
+          cp kernel-out/vmlinuz isodir/boot/vmlinuz
+          cp kernel-out/initramfs isodir/boot/initramfs
+          cp kernel-out/initramfs-live isodir/boot/initramfs-live
+          sudo mksquashfs stage/root isodir/kyanite/rootfs.squashfs -comp gzip -noappend -quiet
+          sudo mksquashfs stage/installer isodir/kyanite/installer.squashfs -comp gzip -noappend -quiet
+          sudo chown -R "$(id -u):$(id -g)" isodir
+          cat > isodir/boot/grub/grub.cfg <<'EOF'
+          set timeout=3
+          set default=0
+          set extra=""
+          # Marcadores que solo existen en las ISOs de prueba (el CI los anade)
+          if [ -e /kyanite-serial ]; then set extra="console=ttyS0,115200"; fi
+          if [ -e /kyanite-autoinstall ]; then set extra="$extra kyanite.autoinstall=auto"; fi
+          menuentry "Kyanite (live)" {
+            linux /boot/vmlinuz console=tty0 $extra
+            initrd /boot/initramfs-live
+          }
+          EOF
+
+          make_iso() {   # make_iso SALIDA [marcadores...]
+            local out=$1; shift
+            local tmp; tmp=$(mktemp -d -p .)
+            cp -a isodir/. "$tmp"/
+            for m in "$@"; do touch "$tmp/$m"; done
+            grub-mkrescue -o "$out" "$tmp"
+            rm -rf "$tmp"
+          }
+          make_iso kyanite-x86_64-live.iso
+          make_iso test-live.iso kyanite-serial
+          make_iso test-install.iso kyanite-serial kyanite-autoinstall
+          ls -lh ./*.iso
+
+      - name: Tests - imagen de disco (BIOS/UEFI x SATA/USB)
+        if: ${{ !cancelled() && steps.img.outcome == 'success' }}
         run: |
           set -uo pipefail
-          OVMF=$(ls /usr/share/ovmf/OVMF.fd /usr/share/OVMF/OVMF.fd 2>/dev/null | head -n1)
-          echo "OVMF: ${OVMF:-NO ENCONTRADO}"
-
-          # KVM si el runner lo permite (si no, QEMU cae a TCG, mas lento)
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
-          sudo udevadm control --reload-rules; sudo udevadm trigger --name-match=kvm || true
-
-          # copia de prueba que arranca con consola serie
-          cp --sparse=always kyanite-x86_64.img test.img
-          LOOP=$(sudo losetup --find --show --partscan test.img)
-          sudo udevadm settle || true; sleep 1
-          sudo mount "${LOOP}p2" mnt/esp
-          sudo grub-editenv mnt/esp/boot/grub/grubenv set saved_entry=serial
-          sudo umount mnt/esp
-          sudo losetup -d "$LOOP"
-
-          FAIL=0
-          run_case() {
-            local fw=$1 bus=$2 log="serial-$1-$2.log" ok=0
-            local fwargs=() busargs=()
-            : > "$log"
-            [ "$fw" = uefi ] && fwargs=(-bios "$OVMF")
-            if [ "$bus" = sata ]; then
-              busargs=(-device ide-hd,drive=d0,bus=ide.0,bootindex=0)
-            else
-              busargs=(-device qemu-xhci,id=xhci -device usb-storage,bus=xhci.0,drive=d0,bootindex=0)
-            fi
-            qemu-system-x86_64 -machine q35,accel=kvm:tcg -cpu max -m 1024 -smp 2 \
-              "${fwargs[@]}" \
-              -drive if=none,id=d0,file=test.img,format=raw,snapshot=on \
-              "${busargs[@]}" \
-              -display none -serial "file:$log" -net none -no-reboot &
-            local qp=$!
-            for i in $(seq 1 75); do
-              sleep 2
-              if grep -qaiE "$EXPECT" "$log"; then ok=1; break; fi
-              grep -qa "Kernel panic" "$log" && break
-              kill -0 "$qp" 2>/dev/null || break
+          source image/lib-test.sh
+          enable_kvm
+          cp --sparse=always kyanite-x86_64.img test-disk.img
+          set_serial_entry test-disk.img
+          for fw in bios uefi; do
+            for bus in sata usb; do
+              if [ "$bus" = sata ]; then
+                dev="-device ide-hd,drive=d0,bus=ide.0,bootindex=0"
+              else
+                dev="-device qemu-xhci,id=xhci -device usb-storage,bus=xhci.0,drive=d0,bootindex=0"
+              fi
+              run_vm "disk-$fw-$bus" "$EXPECT" 0 $(fw_args "$fw") \
+                -drive if=none,id=d0,file=test-disk.img,format=raw,snapshot=on $dev || true
             done
-            kill "$qp" 2>/dev/null; wait "$qp" 2>/dev/null
-            local k=no r=no
-            grep -qa "Linux version" "$log" && k=si
-            grep -qaE "EXT4-fs \(.*\): mounted" "$log" && r=si
-            if [ "$ok" = 1 ]; then
-              echo "OK   $fw/$bus  (kernel: $k, root ext4: $r)"
-            else
-              echo "FAIL $fw/$bus  (kernel: $k, root ext4: $r)"; tail -n 40 "$log"; FAIL=1
-            fi
-          }
-          for fw in bios uefi; do for bus in sata usb; do run_case "$fw" "$bus"; done; done
-          exit $FAIL
+          done
+          exit 0
 
-      - name: Subir imagenes y logs
+      - name: Tests - ISO live (BIOS/UEFI x CD/USB)
+        if: ${{ !cancelled() && steps.iso.outcome == 'success' }}
+        run: |
+          set -uo pipefail
+          source image/lib-test.sh
+          enable_kvm
+          for fw in bios uefi; do
+            run_vm "live-$fw-cdrom" "$EXPECT" 0 $(fw_args "$fw") \
+              -drive if=none,id=cd0,file=test-live.iso,media=cdrom,readonly=on \
+              -device ide-cd,drive=cd0,bus=ide.1,bootindex=0 || true
+            run_vm "live-$fw-usb" "$EXPECT" 0 $(fw_args "$fw") \
+              -drive if=none,id=u0,file=test-live.iso,format=raw,readonly=on \
+              -device qemu-xhci,id=xhci -device usb-storage,bus=xhci.0,drive=u0,bootindex=0 || true
+          done
+          exit 0
+
+      - name: Tests - instalador (live -> disco -> arranque del disco instalado)
+        if: ${{ !cancelled() && steps.iso.outcome == 'success' }}
+        run: |
+          set -uo pipefail
+          source image/lib-test.sh
+          enable_kvm
+          truncate -s 2G target.img
+          if EXPECT_RAW=1 LIMIT=300 run_vm "install-bios" "KYANITE-INSTALL-DONE" 1 \
+              -drive if=none,id=cd0,file=test-install.iso,media=cdrom,readonly=on \
+              -device ide-cd,drive=cd0,bus=ide.1,bootindex=0 \
+              -drive if=none,id=d0,file=target.img,format=raw -device ide-hd,drive=d0,bus=ide.0; then
+            set_serial_entry target.img
+            for fw in bios uefi; do
+              run_vm "installed-$fw" "$EXPECT" 0 $(fw_args "$fw") \
+                -drive if=none,id=d0,file=target.img,format=raw,snapshot=on \
+                -device ide-hd,drive=d0,bus=ide.0,bootindex=0 || true
+            done
+          else
+            record_skip installed-bios "la instalacion fallo"
+            record_skip installed-uefi "la instalacion fallo"
+          fi
+          exit 0
+
+      - name: Informe con capturas (resumen del job)
+        if: always()
+        run: bash image/report.sh
+
+      - name: Subir imagenes
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kyanite-x86_64-bootable
+          name: kyanite-x86_64-images
           path: |
             kyanite-x86_64.img
             kyanite-x86_64.vdi
             kyanite-x86_64.vmdk
+            kyanite-x86_64-live.iso
             README-WINDOWS.txt
-            serial-*.log
           if-no-files-found: warn
+
+      - name: Subir capturas y logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kyanite-ci-shots
+          path: shots
+          if-no-files-found: warn
+
+      - name: Veredicto
+        run: |
+          if [ ! -s shots/results.tsv ]; then echo "::error::no se ejecuto ningun test"; exit 1; fi
+          if awk -F'\t' '$2=="fail"{f=1} END{exit !f}' shots/results.tsv; then
+            echo "::error::hay tests de arranque fallidos (mira el resumen del job)"; exit 1
+          fi
 
       - name: Publicar zip en una release (opcional)
         if: inputs.release_tag != ''
         run: |
           set -euo pipefail
-          zip -9 kyanite-x86_64-bootable.zip kyanite-x86_64.img kyanite-x86_64.vdi kyanite-x86_64.vmdk README-WINDOWS.txt
+          zip -9 kyanite-x86_64-bootable.zip kyanite-x86_64.img kyanite-x86_64.vdi kyanite-x86_64.vmdk \
+            kyanite-x86_64-live.iso README-WINDOWS.txt
           gh release upload "$RELEASE_TAG" kyanite-x86_64-bootable.zip --repo "$REPO" --clobber
