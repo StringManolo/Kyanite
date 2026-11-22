@@ -61,6 +61,7 @@ root@kyanite:~#
 - Patch apps that work but they think they don't like nmap
 - Include support for X11?
 - Test different vimrc configs and themes (exclude from vim-tiny?)
+- translate SECURITY.md
 - Test all typical software (to check for missing hooks) Tested:
   - npm
   - python

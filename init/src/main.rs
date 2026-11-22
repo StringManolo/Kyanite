@@ -266,12 +266,108 @@ fn ignore_sigttou() {
     }
 }
 
+/// true = arranque como PID 1 (VM): no hay terminal de control ni tamano de ventana.
+/// En proot (PID != 1) el pty de la app ya trae ambas cosas y no se toca nada.
+fn is_vm_boot() -> bool {
+    std::process::id() == 1
+}
+
+/// Se ejecuta en el hijo ya tras setsid(). Convierte el tty de stdin en terminal de control.
+unsafe fn acquire_ctty() -> bool {
+    // 1) stdin ya es la consola (/dev/ttyAMA0)
+    if libc::isatty(0) == 1 && libc::ioctl(0, libc::TIOCSCTTY as _, 1) == 0 {
+        return true;
+    }
+    // 2) plan B: abrir /dev/console y ponerlo en 0, 1 y 2
+    let fd = libc::open(b"/dev/console\0".as_ptr() as *const libc::c_char, libc::O_RDWR);
+    if fd < 0 {
+        return false;
+    }
+    if libc::ioctl(fd, libc::TIOCSCTTY as _, 1) != 0 {
+        libc::close(fd);
+        return false;
+    }
+    for target in 0..3 {
+        libc::dup2(fd, target);
+    }
+    if fd > 2 {
+        libc::close(fd);
+    }
+    true
+}
+
+/// Pregunta al emulador su tamano (ESC[999;999H + ESC[6n) y lo aplica al tty con TIOCSWINSZ.
+/// Una consola serie (ttyAMA0) no conoce el tamano de la ventana; sin esto el shell asume 0x0 / 24x80.
+fn autodetect_winsize() {
+    unsafe {
+        if libc::isatty(0) != 1 {
+            return;
+        }
+        let mut old: libc::termios = std::mem::zeroed();
+        if libc::tcgetattr(0, &mut old) != 0 {
+            return;
+        }
+        let mut raw = old;
+        libc::cfmakeraw(&mut raw);
+        raw.c_cc[libc::VMIN] = 0;
+        raw.c_cc[libc::VTIME] = 5; // 0,5 s por read
+        if libc::tcsetattr(0, libc::TCSANOW, &raw) != 0 {
+            return;
+        }
+
+        let query = b"\x1b7\x1b[999;999H\x1b[6n\x1b8";
+        libc::write(1, query.as_ptr() as *const libc::c_void, query.len());
+
+        let mut buf = [0u8; 64];
+        let mut len = 0usize;
+        for _ in 0..4 {
+            let n = libc::read(0, buf[len..].as_mut_ptr() as *mut libc::c_void, buf.len() - len);
+            if n > 0 {
+                len += n as usize;
+            }
+            if buf[..len].contains(&b'R') || len == buf.len() {
+                break;
+            }
+        }
+        libc::tcsetattr(0, libc::TCSANOW, &old);
+
+        if let Some((rows, cols)) = parse_cpr(&buf[..len]) {
+            let ws = libc::winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
+            libc::ioctl(0, libc::TIOCSWINSZ as _, &ws);
+            debug(&format!("tamano de ventana detectado: {} filas x {} columnas", rows, cols));
+        } else {
+            debug("el terminal no respondio a ESC[6n: tamano sin cambiar");
+        }
+    }
+}
+
+/// Respuesta del terminal: ESC [ fila ; columna R
+fn parse_cpr(buf: &[u8]) -> Option<(u16, u16)> {
+    let start = buf.windows(2).position(|w| w == b"\x1b[")? + 2;
+    let end = start + buf[start..].iter().position(|&b| b == b'R')?;
+    let text = std::str::from_utf8(&buf[start..end]).ok()?;
+    let (rows, cols) = text.split_once(';')?;
+    let (rows, cols): (u16, u16) = (rows.parse().ok()?, cols.parse().ok()?);
+    if rows == 0 || cols == 0 {
+        None
+    } else {
+        Some((rows, cols))
+    }
+}
+
 /// Se ejecuta en el hijo, justo antes del exec.
-fn child_job_control() {
+fn child_job_control(vm: bool) {
     unsafe {
         let pid = libc::getpid();
 
-        if libc::setpgid(0, 0) != 0 {
+        if vm {
+            // setsid() deja al hijo como lider de sesion y de grupo (pgrp = pid).
+            if libc::setsid() < 0 {
+                log(&format!("setsid() FALLO: {}", io::Error::last_os_error()));
+            } else if !acquire_ctty() {
+                log("no se pudo adquirir el terminal de control");
+            }
+        } else if libc::setpgid(0, 0) != 0 {
             log(&format!("setpgid(0, 0) FALLO: {}", io::Error::last_os_error()));
         }
 
@@ -304,7 +400,7 @@ fn start_shell(args: &[&str]) -> Result<Pid, Errno> {
 
     match unsafe { fork()? } {
         ForkResult::Child => {
-            child_job_control();
+            child_job_control(is_vm_boot());
 
             let error = Command::new(SHELL_PATH)
                 .args(args)
@@ -506,6 +602,9 @@ fn main() {
     debug("========================================");
     debug(&format!("Init PID: {}", std::process::id()));
     ignore_sigttou();
+    if is_vm_boot() {
+        autodetect_winsize();
+    }
 
     if DEBUG_BOOT {
         log_environment();
@@ -554,7 +653,9 @@ fn main() {
             }
         };
 
-        reclaim_tty();
+        if !is_vm_boot() {
+            reclaim_tty();
+        }
 
         if code == 0 || !BOOT_MENU || attempts >= MAX_ATTEMPTS || started.elapsed() > QUICK_EXIT {
             log("Kyanite session is shutting down.");
@@ -597,6 +698,14 @@ mod tests {
         assert!(!wants_passthrough(&v(&["-il"]), false, true));
         assert!(!wants_passthrough(&v(&["-l"]), false, false));
         assert!(!wants_passthrough(&v(&["--login"]), false, true));
+    }
+
+    #[test]
+    fn cpr_is_parsed() {
+        assert_eq!(super::parse_cpr(b"\x1b[62;90R"), Some((62, 90)));
+        assert_eq!(super::parse_cpr(b"basura\x1b[11;1Rmas"), Some((11, 1)));
+        assert_eq!(super::parse_cpr(b"\x1b[0;0R"), None);
+        assert_eq!(super::parse_cpr(b""), None);
     }
 
     #[test]
