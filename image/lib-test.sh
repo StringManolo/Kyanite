@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Utilidades para probar imagenes en QEMU con capturas de pantalla. Se usa con `source`.
-# Todo lo que genera va a shots/<caso>/ (serial.log, frame-*.png) y shots/results.tsv.
+# QEMU test helpers with screenshots. Use with `source`.
+# Everything is written to shots/<case>/ (serial.log, frame-*.png) and shots/results.tsv.
 # shellcheck shell=bash
 
 SHOTS_ROOT=${SHOTS_ROOT:-$PWD/shots}
-LIMIT=${LIMIT:-150}         # segundos maximos por caso
-INTERVAL=${INTERVAL:-3}     # segundos entre capturas
+LIMIT=${LIMIT:-150}         # maximum seconds per case
+INTERVAL=${INTERVAL:-3}     # seconds between screenshots
 mkdir -p "$SHOTS_ROOT"
+
 OVMF=""
 for f in /usr/share/ovmf/OVMF.fd /usr/share/OVMF/OVMF.fd; do
   if [ -f "$f" ]; then OVMF=$f; break; fi
@@ -17,45 +18,55 @@ enable_kvm() {
     | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
   sudo udevadm control --reload-rules
   sudo udevadm trigger --name-match=kvm || true
-  if [ -w /dev/kvm ]; then echo "KVM disponible"; else echo "KVM no disponible: se usa emulacion (mas lento)"; fi
+  if [ -w /dev/kvm ]; then echo "KVM available"; else echo "KVM not available: falling back to emulation (slower)"; fi
 }
 
-# fw_args bios|uefi  -> argumentos de QEMU para el firmware
+# fw_args bios|uefi -> QEMU arguments for the firmware
 fw_args() {
   if [ "$1" = uefi ]; then echo "-bios $OVMF"; fi
   return 0
 }
 
-# set_serial_entry IMAGEN -> deja la entrada "consola serie" como predeterminada en su grubenv
+# wait_node DEVICE -> waits for a block device node to appear
+wait_node() {
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do [ -b "$1" ] && return 0; sleep 1; done
+  return 1
+}
+
+# set_serial_entry IMAGE [PARTITION_NUMBER] [GRUBENV_PATH]
+# Makes the "serial console" entry the default in the image's grubenv.
+# Disk image / wipe install: grubenv is in partition 2 (ESP), path boot/grub/grubenv.
+# Alongside install: grubenv is in the new root partition (3), path boot/grub/grubenv.
 set_serial_entry() {
-  local img=$1 loop i
+  local img=$1 part=${2:-2} env=${3:-boot/grub/grubenv} loop
   loop=$(sudo losetup --find --show --partscan "$img")
   sudo udevadm settle || true
-  for i in 1 2 3 4 5 6 7 8 9 10; do [ -b "${loop}p2" ] && break; sleep 1; done
+  wait_node "${loop}p${part}"
   mkdir -p "$PWD/mnt/esp"
-  sudo mount "${loop}p2" "$PWD/mnt/esp"
-  sudo grub-editenv "$PWD/mnt/esp/boot/grub/grubenv" set saved_entry=serial
+  sudo mount "${loop}p${part}" "$PWD/mnt/esp"
+  sudo grub-editenv "$PWD/mnt/esp/$env" set saved_entry=serial
   sudo umount "$PWD/mnt/esp"
   sudo losetup -d "$loop"
 }
 
 # matches LOG REGEX
-# Solo cuenta la salida que viene DESPUES del traspaso a Kyanite, para no dar por bueno el arranque
-# por texto del firmware/GRUB/kernel:
-#   - disco: despues de "Mounting root: ok." (initramfs de Alpine)
-#   - live : despues de "KYANITE-LIVE: switch_root"
-# OVMF copia el menu de GRUB ("Kyanite", ...) a la consola serie SIN saltos de linea, asi que el
-# texto del menu queda en la misma linea que "Linux version": hay que cortar por texto, no por linea.
-# Con EXPECT_RAW=1 (p. ej. el instalador) basta con que aparezca tras "Linux version".
-# Ignora tambien nuestras lineas de marcadores KYANITE-LIVE/INSTALL (salvo con EXPECT_RAW=1).
-# (grep sin -q a proposito: con pipefail, un grep -q que sale antes provoca SIGPIPE y falsos negativos.)
+# Only counts output that comes AFTER the hand-over to Kyanite, so firmware/GRUB/kernel text cannot make a
+# boot look successful:
+#   - disk: after "Mounting root: ok." (Alpine initramfs)
+#   - live: after "KYANITE-LIVE: switch_root"
+# OVMF copies the GRUB menu ("Kyanite", ...) to the serial console WITHOUT newlines, so it ends up on the
+# same line as "Linux version": the text has to be cut by position, not by line.
+# With EXPECT_RAW=1 (e.g. the installer, which never reaches Kyanite) it is enough that it appears after "Linux version".
+# Our own marker lines (KYANITE-LIVE/INSTALL/BOOT) are ignored unless EXPECT_RAW=1.
+# (grep without -q on purpose: with pipefail a grep -q that exits early causes SIGPIPE and false negatives.)
 matches() {
   if [ "${EXPECT_RAW:-0}" = 1 ]; then
     LC_ALL=C awk 'f{print; next} /Linux version/{sub(/^.*Linux version/, "Linux version"); f=1; print}' "$1" \
       | grep -aiE "$2" >/dev/null
   else
     LC_ALL=C awk 'f{print; next} match($0, /Mounting root: ok\.|KYANITE-LIVE: switch_root/){f=1; print substr($0, RSTART + RLENGTH)}' "$1" \
-      | grep -av 'KYANITE-\(LIVE\|INSTALL\)' | grep -aiE "$2" >/dev/null
+      | grep -av 'KYANITE-\(LIVE\|INSTALL\|BOOT\)' | grep -aiE "$2" >/dev/null
   fi
 }
 
@@ -64,21 +75,26 @@ detect_stages() {
   grep -qa "Linux version" "$log" && s+=(kernel)
   grep -qaE "EXT4-fs \(.*\): mounted" "$log" && s+=(root-ext4)
   grep -qa "KYANITE-LIVE: switch_root" "$log" && s+=(live-init)
-  grep -qa "KYANITE-SMOKE: inicio" "$log" && s+=(smoke-script)
-  grep -qa "KYANITE-INSTALL-DONE" "$log" && s+=(instalador)
+  grep -qa "KYANITE-BOOT: coldplug done" "$log" && s+=(hw-setup)
+  grep -qa "KYANITE-SMOKE: start" "$log" && s+=(smoke-script)
+  grep -qa "KYANITE-INSTALL-DONE" "$log" && s+=(installer)
   local IFS=,
-  echo "${s[*]:-ninguna}"
+  echo "${s[*]:-none}"
 }
 
 record() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$SHOTS_ROOT/results.tsv"; }
 record_skip() { record "$1" skip "$2" "-"; }
 
-# run_vm NOMBRE REGEX_ESPERADA ESPERAR_APAGADO(0|1) [argumentos de QEMU...]
-# Devuelve 0 si la salida serie coincide con la regex. Variables opcionales: LIMIT, VM_MEM, VM_CPU (def. max), VM_ACCEL (def. kvm:tcg), VM_SOFT (1 = aviso en vez de fallo), EXPECT_RAW.
+# run_vm NAME EXPECTED_REGEX WAIT_FOR_POWEROFF(0|1) [QEMU arguments...]
+# Returns 0 if the serial output matches the regex.
+# Optional variables: LIMIT, VM_MEM, VM_CPU (default max), VM_ACCEL (default kvm:tcg),
+#                     VM_SOFT (1 = report a warning instead of a failure), EXPECT_RAW, NEED_FW (1 = fw=0 is a failure)
 run_vm() {
   local name=$1 expect=$2 waitexit=$3; shift 3
   local dir="$SHOTS_ROOT/$name" log="$SHOTS_ROOT/$name/serial.log"
-  local ok=0 reason="tiempo agotado" qp sp i stages
+  local ok=0 reason="timed out" qp sp i stages
+  local failre='Kernel panic|KYANITE-(LIVE|INSTALL): ERROR|KYANITE-SMOKE summary .*(vim=[1-9]|net=none|kbd=none)'
+  [ "${NEED_FW:-0}" = 1 ] && failre="$failre|KYANITE-SMOKE summary .*fw=0 "
   rm -rf "$dir"; mkdir -p "$dir"; : > "$log"
   echo "::group::$name"
 
@@ -91,9 +107,9 @@ run_vm() {
 
   for ((i = 0; i < LIMIT / 2; i++)); do
     sleep 2
-    if matches "$log" "$expect"; then ok=1; reason="salida esperada encontrada"; break; fi
-    if grep -qaE 'Kernel panic|KYANITE-(LIVE|INSTALL): ERROR|KYANITE-SMOKE vim rc=[1-9]' "$log"; then reason="error durante el arranque"; break; fi
-    if ! kill -0 "$qp" 2>/dev/null; then reason="QEMU termino sin la salida esperada"; break; fi
+    if matches "$log" "$expect"; then ok=1; reason="expected output found"; break; fi
+    if grep -qaE "$failre" "$log"; then reason="error during boot"; break; fi
+    if ! kill -0 "$qp" 2>/dev/null; then reason="QEMU exited without the expected output"; break; fi
   done
   if [ "$ok" = 1 ] && [ "$waitexit" = 1 ]; then
     for i in $(seq 1 20); do kill -0 "$qp" 2>/dev/null || break; sleep 2; done
@@ -103,12 +119,12 @@ run_vm() {
 
   stages=$(detect_stages "$log")
   if [ "$ok" = 1 ]; then
-    echo "OK   $name ($reason; etapas: $stages)"
+    echo "OK   $name ($reason; stages: $stages)"
     record "$name" ok "$reason" "$stages"
   else
     local status=fail
-    [ "${VM_SOFT:-0}" = 1 ] && status=warn   # informativo: no hace fallar el veredicto
-    echo "${status^^} $name ($reason; etapas: $stages)"
+    [ "${VM_SOFT:-0}" = 1 ] && status=warn   # informational: does not fail the verdict
+    echo "${status^^} $name ($reason; stages: $stages)"
     tail -n 30 "$log" | tr -cd '\11\12\40-\176'
     record "$name" "$status" "$reason" "$stages"
   fi
@@ -116,16 +132,19 @@ run_vm() {
   [ "$ok" = 1 ]
 }
 
-# make_smoke_image ORIGEN DESTINO
-# Copia de la imagen de disco con /kyanite-smoke.sh en el rootfs y una entrada de GRUB que lo usa
-# como init (init=/kyanite-smoke.sh). Comprueba que los binarios arrancan en la CPU de la VM, sin
-# pasar por kyanite-init. Solo toca la copia; la imagen final no cambia.
+# make_smoke_image SOURCE DEST
+# Copy of the disk image with /kyanite-smoke.sh in the rootfs and a GRUB entry that uses it as init.
+# It checks, without going through kyanite-init, that on this VM:
+#   - vim runs (CPU instruction compatibility)         - a network driver gets loaded (coldplug)
+#   - a USB keyboard driver gets loaded (coldplug)     - firmware files are present (hardware variant)
+#   - the console keymap loads (informational)
+# Only the copy is touched; the final image is unchanged.
 make_smoke_image() {
-  local src=$1 dst=$2 loop i uuidarg
+  local src=$1 dst=$2 loop uuidarg
   cp --sparse=always "$src" "$dst"
   loop=$(sudo losetup --find --show --partscan "$dst")
   sudo udevadm settle || true
-  for i in 1 2 3 4 5 6 7 8 9 10; do [ -b "${loop}p3" ] && break; sleep 1; done
+  wait_node "${loop}p3"
   mkdir -p "$PWD/mnt/esp" "$PWD/mnt/root"
   sudo mount "${loop}p3" "$PWD/mnt/root"
   sudo mount "${loop}p2" "$PWD/mnt/esp"
@@ -133,27 +152,131 @@ make_smoke_image() {
   sudo tee "$PWD/mnt/root/kyanite-smoke.sh" >/dev/null <<'EOF'
 #!/bin/brush
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-echo "KYANITE-SMOKE: inicio"
-if ! command -v vim >/dev/null 2>&1; then
-  echo "KYANITE-SMOKE vim rc=127 (vim no esta en el rootfs)"
-else
+echo "KYANITE-SMOKE: start"
+/usr/lib/kyanite/hw/hw-setup
+
+vim=127
+first=
+if command -v vim >/dev/null 2>&1; then
   vim --version > /tmp/kyanite-vim.txt 2>&1
-  rc=$?
+  vim=$?
   read -r first < /tmp/kyanite-vim.txt
-  echo "KYANITE-SMOKE vim rc=$rc ($first)"
 fi
+
+net=none
+for d in /sys/class/net/*; do
+  n=${d##*/}
+  [ "$n" = lo ] || [ ! -e "$d" ] || net=ok
+done
+
+kbd=none
+while read -r line; do
+  case "$line" in
+    *"USB Keyboard"*) kbd=ok ;;
+  esac
+done < /proc/bus/input/devices
+
+fw=0
+for f in /lib/firmware/*; do
+  [ -e "$f" ] && fw=$((fw + 1))
+done
+
+km=none
+[ -r /run/kyanite/keymap ] && read -r km < /run/kyanite/keymap
+
+echo "KYANITE-SMOKE summary vim=$vim net=$net kbd=$kbd fw=$fw keymap=$km ($first)"
 read -r _
 EOF
   sudo chmod 755 "$PWD/mnt/root/kyanite-smoke.sh"
 
   uuidarg=$(grep -o 'root=UUID=[^ ]*' "$PWD/mnt/esp/boot/grub/grub.cfg" | head -n1)
   sudo tee -a "$PWD/mnt/esp/boot/grub/grub.cfg" >/dev/null <<EOF
+
 menuentry "Kyanite (smoke)" --id smoke {
-  linux /vmlinuz $uuidarg rootfstype=ext4 rw rootflags=rw init=/kyanite-smoke.sh console=tty0 console=ttyS0,115200
+  linux /vmlinuz $uuidarg rootfstype=ext4 rw rootflags=rw init=/kyanite-smoke.sh console=tty0 console=ttyS0,115200 kyanite.keymap=es
   initrd /initramfs
 }
 EOF
   sudo grub-editenv "$PWD/mnt/esp/boot/grub/grubenv" set saved_entry=smoke
   sudo umount "$PWD/mnt/esp" "$PWD/mnt/root"
   sudo losetup -d "$loop"
+}
+
+# make_fake_windows_disk IMAGE
+# 8 GiB GPT disk that imitates a Windows PC: 100 MiB EFI System Partition (FAT32) with a fake
+# EFI/Microsoft/Boot/bootmgfw.efi, a 1 GiB NTFS partition with a file, and the rest left free.
+# Checksums of what must stay untouched are saved next to the image (IMAGE.sha.*, IMAGE.pt0).
+make_fake_windows_disk() {
+  local img=$1 loop
+  rm -f "$img" "$img".sha.* "$img".pt0
+  truncate -s 8G "$img"
+  sgdisk -o "$img" >/dev/null
+  sgdisk -n 1:2048:+100M -t 1:ef00 -c 1:"EFI system partition" "$img" >/dev/null
+  sgdisk -n 2:0:+1G -t 2:0700 -c 2:"Basic data partition" "$img" >/dev/null
+  loop=$(sudo losetup --find --show --partscan "$img")
+  sudo udevadm settle || true
+  wait_node "${loop}p2"
+  sudo mkfs.vfat -F 32 -n SYSTEM "${loop}p1" >/dev/null
+  sudo mkfs.ntfs -Q -L Windows "${loop}p2" >/dev/null 2>&1
+
+  mkdir -p "$PWD/mnt/esp" "$PWD/mnt/ntfs"
+  sudo mount "${loop}p1" "$PWD/mnt/esp"
+  sudo mkdir -p "$PWD/mnt/esp/EFI/Microsoft/Boot"
+  head -c 65536 /dev/urandom | sudo tee "$PWD/mnt/esp/EFI/Microsoft/Boot/bootmgfw.efi" >/dev/null
+  sudo sha256sum "$PWD/mnt/esp/EFI/Microsoft/Boot/bootmgfw.efi" | cut -d' ' -f1 > "$img.sha.bootmgfw"
+  sudo umount "$PWD/mnt/esp"
+
+  sudo mount -t ntfs3 "${loop}p2" "$PWD/mnt/ntfs" 2>/dev/null || sudo mount -t ntfs-3g "${loop}p2" "$PWD/mnt/ntfs"
+  echo "fake windows data" | sudo tee "$PWD/mnt/ntfs/pagefile.sys" >/dev/null
+  sudo umount "$PWD/mnt/ntfs"
+
+  sudo dd if="${loop}p2" bs=1M status=none | sha256sum | cut -d' ' -f1 > "$img.sha.ntfs"
+  sgdisk -p "$img" | awk '$1 ~ /^[0-9]+$/' > "$img.pt0"
+  sudo losetup -d "$loop"
+}
+
+# verify_alongside IMAGE
+# Checks, after an "alongside" install, that Windows' data is untouched and Kyanite is in place.
+# Records one result line ("alongside-verify").
+verify_alongside() {
+  local img=$1 loop ok=1 details="" new
+  loop=$(sudo losetup --find --show --partscan "$img")
+  sudo udevadm settle || true
+  wait_node "${loop}p3"
+  mkdir -p "$PWD/mnt/esp" "$PWD/mnt/root"
+
+  new=$(sudo dd if="${loop}p2" bs=1M status=none | sha256sum | cut -d' ' -f1)
+  if [ "$new" = "$(cat "$img.sha.ntfs")" ]; then details="$details ntfs-intact"; else details="$details NTFS-CHANGED"; ok=0; fi
+
+  if [ "$(sgdisk -p "$img" | awk '$1 ~ /^[0-9]+$/' | head -n 2)" = "$(head -n 2 "$img.pt0")" ]; then
+    details="$details windows-partitions-unchanged"
+  else
+    details="$details PARTITIONS-CHANGED"; ok=0
+  fi
+
+  sudo mount -o ro "${loop}p1" "$PWD/mnt/esp"
+  new=$(sudo sha256sum "$PWD/mnt/esp/EFI/Microsoft/Boot/bootmgfw.efi" | cut -d' ' -f1)
+  if [ "$new" = "$(cat "$img.sha.bootmgfw")" ]; then details="$details bootmgfw-intact"; else details="$details BOOTMGFW-CHANGED"; ok=0; fi
+  if sudo test -f "$PWD/mnt/esp/EFI/Kyanite/grubx64.efi"; then details="$details esp-has-kyanite"; else details="$details NO-EFI/Kyanite"; ok=0; fi
+  if sudo test -f "$PWD/mnt/esp/EFI/BOOT/BOOTX64.EFI"; then details="$details fallback-present"; else details="$details NO-FALLBACK"; ok=0; fi
+  sudo umount "$PWD/mnt/esp"
+
+  sudo mount -o ro "${loop}p3" "$PWD/mnt/root"
+  if sudo test -f "$PWD/mnt/root/boot/vmlinuz" && sudo test -f "$PWD/mnt/root/boot/initramfs"; then
+    details="$details kernel-in-root"; else details="$details NO-KERNEL-IN-ROOT"; ok=0
+  fi
+  if sudo grep -q 'menuentry "Windows"' "$PWD/mnt/root/boot/grub/grub.cfg"; then
+    details="$details grub-has-windows-entry"; else details="$details NO-WINDOWS-ENTRY"; ok=0
+  fi
+  sudo umount "$PWD/mnt/root"
+  sudo losetup -d "$loop"
+
+  if [ "$ok" = 1 ]; then
+    echo "OK   alongside-verify ($details)"
+    record alongside-verify ok "Windows data untouched, Kyanite installed alongside" "$details"
+  else
+    echo "FAIL alongside-verify ($details)"
+    record alongside-verify fail "alongside install checks failed" "$details"
+  fi
+  [ "$ok" = 1 ]
 }

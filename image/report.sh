@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
-# Genera el resumen del job (GITHUB_STEP_SUMMARY) con el resultado de cada test y sus capturas.
-# - Convierte los PNG a JPG, hace una hoja de contacto por caso (<=12 fotogramas + el ultimo)
-# - Publica hojas y ultimas capturas en la rama huerfana "ci-screenshots" (solo las 6 ultimas ejecuciones)
-#   para poder incrustarlas en el markdown (los artifacts no se pueden enlazar como imagen).
-# Entorno: REPO, GH_TOKEN, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, GITHUB_STEP_SUMMARY
+# Writes the job summary (GITHUB_STEP_SUMMARY) with the result of each test and its screenshots.
+# - Converts PNG frames to JPG and builds one contact sheet per case (<= 12 frames + the last one)
+# - Publishes sheets and last screenshots to the orphan branch "ci-screenshots" (only the last runs are kept)
+#   so they can be embedded in the markdown (artifacts cannot be linked as images)
+# Environment: REPO, GH_TOKEN, VARIANT, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, GITHUB_STEP_SUMMARY
 set -uo pipefail
 
 ROOT=shots
-RUN="${GITHUB_RUN_ID:-0}-${GITHUB_RUN_ATTEMPT:-1}"
+VARIANT=${VARIANT:-vm}
+RUN="${GITHUB_RUN_ID:-0}-${GITHUB_RUN_ATTEMPT:-1}-${VARIANT}"
 OUT="report/$RUN"
 FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
 SUMMARY=${GITHUB_STEP_SUMMARY:-/dev/stdout}
+KEEP_RUNS=12
 mkdir -p "$OUT"
 
-# --- fotogramas -> JPG + hoja de contacto ------------------------------------------------
+# --- frames -> JPG + contact sheet ---------------------------------------------------------------
 FONTARGS=()
 [ -f "$FONT" ] && FONTARGS=(-font "$FONT")
 for dir in "$ROOT"/*/; do
@@ -34,7 +36,7 @@ for dir in "$ROOT"/*/; do
   cp "${F[n-1]}" "$OUT/$name/last.jpg"
 done
 
-# --- publicar en la rama ci-screenshots -----------------------------------------------------
+# --- publish to the ci-screenshots branch ---------------------------------------------------------
 HOSTED=0
 if [ -n "$(ls -A "$OUT" 2>/dev/null)" ] && [ -n "${GH_TOKEN:-}" ] && [ -n "${REPO:-}" ]; then
   URL="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
@@ -49,7 +51,7 @@ if [ -n "$(ls -A "$OUT" 2>/dev/null)" ] && [ -n "${GH_TOKEN:-}" ] && [ -n "${REP
     git remote get-url origin >/dev/null 2>&1 || git remote add origin "$URL"
     mkdir -p runs
     cp -r "../$OUT" "runs/$RUN"
-    ls -1 runs | sort -V | head -n -6 | xargs -r -I{} rm -rf "runs/{}"
+    ls -1 runs | sort -V | head -n "-$KEEP_RUNS" | xargs -r -I{} rm -rf "runs/{}"
     git checkout -q --orphan snapshot 2>/dev/null || git switch -q --orphan snapshot 2>/dev/null || true
     git add -A
     git commit -q -m "screenshots run $RUN"
@@ -60,43 +62,44 @@ if [ -n "$(ls -A "$OUT" 2>/dev/null)" ] && [ -n "${GH_TOKEN:-}" ] && [ -n "${REP
 fi
 BASE="https://raw.githubusercontent.com/${REPO:-}/ci-screenshots/runs/${RUN}"
 
-# Quita secuencias de escape (CSI como ESC[6n o ESC[=3h; y las de 2 bytes como ESC7/ESC8) y deja texto plano.
+# Strip escape sequences (CSI like ESC[6n or ESC[=3h, and 2-byte ones like ESC7/ESC8) and keep plain text
 clean() { sed 's/\x1b\[[0-9;?=<>]*[A-Za-z]//g; s/\x1b[()][A-Za-z0-9]//g; s/\x1b[78=>]//g' | tr -cd '\11\12\40-\176'; }
 
-# --- resumen markdown -----------------------------------------------------------------------
+# --- markdown summary ---------------------------------------------------------------------------------
 {
-  echo "## Tests de arranque de Kyanite"
+  echo "## Kyanite boot tests - ${VARIANT}"
   echo
   if [ ! -s "$ROOT/results.tsv" ]; then
-    echo "No se llego a ejecutar ningun test (fallo la construccion). Mira los pasos anteriores del job."
+    echo "No test was run (the build failed). Check the previous steps of the job."
   else
-    echo "| Caso | Resultado | Motivo | Etapas vistas |"
+    echo "| Case | Result | Reason | Stages seen |"
     echo "|---|---|---|---|"
     while IFS=$'\t' read -r name status reason stages; do
-      case "$status" in ok) icon="OK";; fail) icon="FALLO";; warn) icon="AVISO";; *) icon="OMITIDO";; esac
+      case "$status" in ok) icon="OK";; fail) icon="FAIL";; warn) icon="WARNING";; *) icon="SKIPPED";; esac
       echo "| $name | $icon | $reason | $stages |"
     done < "$ROOT/results.tsv"
     echo
-    echo "_Etapas: kernel = el kernel arranco; root-ext4 = monto la raiz; live-init = el initramfs live llego a switch_root;"
-    echo "instalador = termino la instalacion. \"Salida esperada\" es el regex del input \`expect\`._"
+    echo "_Stages: kernel = the kernel booted; root-ext4 = the root filesystem was mounted; live-init = the live initramfs reached switch_root;"
+    echo "hw-setup = driver coldplug ran; smoke-script = the smoke test ran; installer = the installation finished."
+    echo "\"Expected output\" is the regex of the \`expect\` input. A WARNING does not fail the workflow._"
     echo
     while IFS=$'\t' read -r name status reason stages; do
-      case "$status" in ok) icon="OK";; fail) icon="FALLO";; warn) icon="AVISO";; *) icon="OMITIDO";; esac
+      case "$status" in ok) icon="OK";; fail) icon="FAIL";; warn) icon="WARNING";; *) icon="SKIPPED";; esac
       open=""; if [ "$status" = fail ] || [ "$status" = warn ]; then open=" open"; fi
       echo "<details$open><summary><b>$icon</b> $name - $reason ($stages)</summary>"
       echo
       if [ "$HOSTED" = 1 ] && [ -f "$OUT/$name/sheet.jpg" ]; then
-        echo "Evolucion del arranque (una captura cada pocos segundos; el nombre es el segundo):"
+        echo "Boot progress (one screenshot every few seconds; the label is the second):"
         echo
         echo "![$name]($BASE/$name/sheet.jpg)"
         echo
-        echo "Ultima pantalla:"
+        echo "Last screen:"
         echo
-        echo "![$name ultima]($BASE/$name/last.jpg)"
+        echo "![$name last]($BASE/$name/last.jpg)"
         echo
       fi
       if [ -f "$ROOT/$name/serial.log" ]; then
-        echo "Final de la consola serie:"
+        echo "End of the serial console:"
         echo
         echo '```'
         tail -n 25 "$ROOT/$name/serial.log" | clean
@@ -107,9 +110,9 @@ clean() { sed 's/\x1b\[[0-9;?=<>]*[A-Za-z]//g; s/\x1b[()][A-Za-z0-9]//g; s/\x1b[
     done < "$ROOT/results.tsv"
   fi
   if [ "$HOSTED" = 1 ]; then
-    echo "Las capturas se publican en la rama \`ci-screenshots\` (se conservan las ultimas 6 ejecuciones)."
+    echo "Screenshots are published on the \`ci-screenshots\` branch (the last ${KEEP_RUNS} runs are kept)."
   else
-    echo "No se pudieron incrustar las capturas (no se pudo publicar la rama \`ci-screenshots\`)."
+    echo "Screenshots could not be embedded (publishing to the \`ci-screenshots\` branch failed or the repository is private)."
   fi
-  echo "Todas las capturas y los logs completos estan en el artifact **kyanite-ci-shots**; las imagenes en **kyanite-x86_64-images**."
+  echo "All screenshots and full serial logs are in the artifact **kyanite-ci-shots-${VARIANT}**; the images are in the image artifact of this variant."
 } >> "$SUMMARY"

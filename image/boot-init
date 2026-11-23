@@ -1,0 +1,6 @@
+#!/usr/lib/kyanite/hw/busybox sh
+# PID 1 wrapper for the x86_64 images.
+# GRUB passes init=/usr/lib/kyanite/hw/boot-init. This runs the hardware setup once and then
+# replaces itself with Kyanite's real init (exec keeps PID 1, so kyanite-init still sees PID 1).
+/usr/lib/kyanite/hw/hw-setup
+exec /sbin/init "$@"

@@ -1,8 +1,10 @@
 #!/bin/sh
-# Kyanite live - /init del initramfs (busybox ash).
-# 1) Busca el medio (CD/USB/ISO) que contiene /kyanite/rootfs.squashfs
-# 2) Monta rootfs + overlay en RAM y hace switch_root a /sbin/init de Kyanite
-# Con kyanite.autoinstall=auto|/dev/xxx en la cmdline: instala en disco sin preguntar y apaga.
+# Kyanite live - /init of the live initramfs (busybox ash).
+# 1) Finds the medium (CD/USB/ISO) that holds /kyanite/rootfs.squashfs
+# 2) Mounts the rootfs + a RAM overlay and does switch_root into Kyanite
+# Kernel command line:
+#   kyanite.autoinstall=auto|/dev/xxx   install without asking, then power off (used by CI)
+#   kyanite.mode=wipe|alongside         install mode for the autoinstall (default wipe)
 
 export PATH=/sbin:/bin:/usr/sbin:/usr/bin
 /bin/busybox --install -s /bin 2>/dev/null
@@ -15,14 +17,16 @@ mkdir -p /run /tmp /mnt/media /mnt/rootfs /mnt/installer /mnt/rw /mnt/new
 log() { echo "KYANITE-LIVE: $*"; }
 emergency() {
   echo "KYANITE-LIVE: ERROR: $*"
-  echo "Abriendo una shell de emergencia."
+  echo "Dropping to an emergency shell."
   exec setsid cttyhack /bin/sh
 }
 
 AUTO=""
+MODE=""
 for p in $(cat /proc/cmdline); do
   case "$p" in
     kyanite.autoinstall=*) AUTO="${p#kyanite.autoinstall=}" ;;
+    kyanite.mode=*)        MODE="${p#kyanite.mode=}" ;;
   esac
 done
 
@@ -30,7 +34,7 @@ coldplug() {
   find /sys -name modalias -type f -print0 2>/dev/null | xargs -0 cat 2>/dev/null | sort -u | xargs modprobe -ab 2>/dev/null
 }
 
-log "cargando drivers"
+log "loading drivers"
 for m in loop squashfs overlay isofs cdrom sr_mod sd_mod usb_storage uas ahci libahci \
          ata_piix ata_generic nvme virtio_blk virtio_pci virtio_scsi mmc_block ext4 vfat \
          nls_cp437 nls_iso8859_1 nls_utf8; do
@@ -38,10 +42,13 @@ for m in loop squashfs overlay isofs cdrom sr_mod sd_mod usb_storage uas ahci li
 done
 coldplug
 
-# --- buscar el medio -------------------------------------------------------
+# --- find the medium -------------------------------------------------------------------------
 try_dev() {
   dev=$1
   [ -b "$dev" ] || return 1
+  # skip devices with no media (empty CD drive): avoids noisy "Can't open blockdev" messages
+  sz=$(cat "/sys/class/block/${dev#/dev/}/size" 2>/dev/null)
+  [ "${sz:-0}" -gt 0 ] || return 1
   for fs in iso9660 auto; do
     if mount -t "$fs" -o ro "$dev" /mnt/media 2>/dev/null; then
       [ -f /mnt/media/kyanite/rootfs.squashfs ] && return 0
@@ -62,35 +69,40 @@ while [ "$n" -lt 40 ] && [ -z "$MEDIA" ]; do
   [ $((n % 5)) -eq 0 ] && coldplug
   sleep 1
 done
-[ -n "$MEDIA" ] || emergency "no encuentro el medio (busco /kyanite/rootfs.squashfs)"
-log "medio: $MEDIA"
+[ -n "$MEDIA" ] || emergency "medium not found (looking for /kyanite/rootfs.squashfs)"
+log "medium: $MEDIA"
 
 mount -t squashfs -o loop,ro /mnt/media/kyanite/rootfs.squashfs /mnt/rootfs \
-  || emergency "no puedo montar rootfs.squashfs"
+  || emergency "cannot mount rootfs.squashfs"
 mount -t squashfs -o loop,ro /mnt/media/kyanite/installer.squashfs /mnt/installer \
-  || log "aviso: sin capa de instalador"
+  || log "warning: no installer layer"
 
-# --- instalacion automatica (CI) -------------------------------------------
+# --- unattended install (CI) -------------------------------------------------------------------
 if [ -n "$AUTO" ]; then
-  log "autoinstall -> $AUTO"
-  K_INSTALLER=/mnt/installer K_ROOTFS=/mnt/rootfs K_MEDIUM=/mnt/media \
-    sh /mnt/installer/usr/local/sbin/kyanite-install-wrapper --auto "$AUTO"
-  log "el instalador termino con codigo $?"
+  log "autoinstall -> $AUTO (mode: ${MODE:-wipe})"
+  if [ -n "$MODE" ]; then
+    K_INSTALLER=/mnt/installer K_ROOTFS=/mnt/rootfs K_MEDIUM=/mnt/media \
+      sh /mnt/installer/usr/local/sbin/kyanite-install-wrapper --auto "$AUTO" --mode "$MODE"
+  else
+    K_INSTALLER=/mnt/installer K_ROOTFS=/mnt/rootfs K_MEDIUM=/mnt/media \
+      sh /mnt/installer/usr/local/sbin/kyanite-install-wrapper --auto "$AUTO"
+  fi
+  log "installer exited with code $?"
   sync
   poweroff -f
 fi
 
-# --- live normal: overlay en RAM ---------------------------------------------
+# --- normal live boot: RAM overlay -----------------------------------------------------------
 mount -t tmpfs -o mode=0755 tmpfs /mnt/rw
 mkdir -p /mnt/rw/upper /mnt/rw/work
 mount -t overlay overlay \
   -o lowerdir=/mnt/rootfs,upperdir=/mnt/rw/upper,workdir=/mnt/rw/work /mnt/new \
-  || emergency "no puedo montar el overlay"
+  || emergency "cannot mount the overlay"
 
 mkdir -p /mnt/new/proc /mnt/new/sys /mnt/new/dev /mnt/new/run /mnt/new/tmp \
   /mnt/new/live/medium /mnt/new/live/rootfs /mnt/new/live/installer /mnt/new/live/rw
 
-# lanzador del instalador (solo existe en el live, no en el sistema instalado)
+# installer launcher (exists only in the live system, never in an installed one)
 mkdir -p /mnt/new/usr/local/sbin
 cat > /mnt/new/usr/local/sbin/kyanite-install <<'EOF'
 #!/live/installer/bin/busybox.static sh
@@ -100,7 +112,7 @@ chmod 755 /mnt/new/usr/local/sbin/kyanite-install
 mkdir -p /mnt/new/sbin 2>/dev/null
 ln -sf /usr/local/sbin/kyanite-install /mnt/new/sbin/kyanite-install 2>/dev/null
 
-log "para instalar en el disco duro ejecuta: /usr/local/sbin/kyanite-install"
+log "to install on the hard disk run: /usr/local/sbin/kyanite-install"
 log "switch_root"
 
 mount --move /mnt/media /mnt/new/live/medium
@@ -111,5 +123,8 @@ mount --move /proc /mnt/new/proc
 mount --move /sys /mnt/new/sys
 mount --move /dev /mnt/new/dev
 
-exec switch_root /mnt/new /sbin/init
-emergency "switch_root fallo"
+# hardware setup (driver coldplug, keymap) runs first when the rootfs ships it
+INIT=/sbin/init
+[ -x /mnt/new/usr/lib/kyanite/hw/boot-init ] && INIT=/usr/lib/kyanite/hw/boot-init
+exec switch_root /mnt/new "$INIT"
+emergency "switch_root failed"

@@ -1,7 +1,7 @@
 #!/bin/sh
-# Prepara el chroot de la capa del instalador (Alpine/musl) y lanza kyanite-install.sh dentro.
-# Se ejecuta con busybox ash, desde el initramfs (autoinstall) o desde el live (interactivo).
-# Variables: K_INSTALLER, K_ROOTFS, K_MEDIUM (por defecto, las rutas del live en /live/*).
+# Prepares the chroot of the installer layer (Alpine/musl) and runs kyanite-install.sh inside it.
+# Runs with busybox ash, from the initramfs (autoinstall) or from the live system (interactive).
+# Variables: K_INSTALLER, K_ROOTFS, K_MEDIUM (defaults: the live paths under /live/*).
 
 K_INSTALLER=${K_INSTALLER:-/live/installer}
 K_ROOTFS=${K_ROOTFS:-/live/rootfs}
@@ -9,7 +9,7 @@ K_MEDIUM=${K_MEDIUM:-/live/medium}
 B=$K_INSTALLER/bin/busybox.static
 
 if [ ! -x "$B" ]; then
-  echo "KYANITE-INSTALL: ERROR: falta la capa del instalador ($B)" >&2
+  echo "KYANITE-INSTALL: ERROR: installer layer not found ($B)" >&2
   exit 1
 fi
 

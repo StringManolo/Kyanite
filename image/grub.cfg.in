@@ -1,0 +1,49 @@
+# GRUB configuration template for the Kyanite disk image and for systems written by the installer.
+# Placeholders (replaced with sed):
+#   @ROOT_UUID@  UUID of the ext4 root filesystem
+#   @KINIT@      init path (/usr/lib/kyanite/hw/boot-init, or /sbin/init for old rootfs)
+#   @KPREFIX@    "" when vmlinuz/initramfs sit at the top of the GRUB root device (ESP layout),
+#                "/boot" when they live inside the ext4 root partition (alongside layout)
+set timeout=3
+load_env
+if [ -z "${saved_entry}" ]; then set saved_entry=normal; fi
+set default="${saved_entry}"
+set extra=""
+
+function kyboot {
+  linux @KPREFIX@/vmlinuz root=UUID=@ROOT_UUID@ rootfstype=ext4 rw rootflags=rw init=@KINIT@ console=tty0 $extra kyanite.keymap=$1
+  initrd @KPREFIX@/initramfs
+}
+
+menuentry "Kyanite" --id normal {
+  kyboot us
+}
+
+menuentry "Kyanite (serial console)" --id serial {
+  set extra="console=ttyS0,115200"
+  kyboot us
+}
+
+submenu "Kyanite - keyboard layout" {
+  menuentry "Spanish (es)" {
+    kyboot es
+  }
+  menuentry "German (de)" {
+    kyboot de
+  }
+  menuentry "French (fr)" {
+    kyboot fr
+  }
+  menuentry "Italian (it)" {
+    kyboot it
+  }
+  menuentry "British (gb)" {
+    kyboot gb
+  }
+  menuentry "Portuguese (pt)" {
+    kyboot pt
+  }
+  menuentry "Brazilian (br-abnt2)" {
+    kyboot br-abnt2
+  }
+}

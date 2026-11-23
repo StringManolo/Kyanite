@@ -1,0 +1,56 @@
+#!/usr/lib/kyanite/hw/busybox sh
+# Kyanite hardware setup. Run once at boot by boot-init (x86_64 images):
+#   1. Load the drivers for the detected hardware (coldplug through modaliases).
+#   2. Load the console keymap (kyanite.keymap=XX on the kernel command line, or /etc/kyanite/keymap).
+# Everything is best effort: nothing here may block or abort the boot.
+# Uses the static busybox shipped next to this script, so it does not depend on the rootfs userland.
+
+BB=/usr/lib/kyanite/hw/busybox
+log() { echo "KYANITE-BOOT: $*"; }
+
+$BB mkdir -p /run/kyanite 2>/dev/null
+
+# ---- 1. driver coldplug -------------------------------------------------------------------
+KVER=$($BB uname -r)
+if [ -d "/lib/modules/$KVER" ]; then
+  for pass in 1 2; do
+    $BB find /sys -name modalias -type f 2>/dev/null \
+      | $BB xargs $BB cat 2>/dev/null \
+      | $BB sort -u \
+      | $BB xargs $BB modprobe -ab 2>/dev/null
+    $BB sleep 1
+  done
+  # Input drivers that may not be reachable through a modalias
+  $BB modprobe -ab atkbd i8042 usbhid hid_generic evdev 2>/dev/null
+  n=$($BB wc -l < /proc/modules)
+  log "coldplug done ($n modules loaded)"
+else
+  log "no modules found for kernel $KVER, coldplug skipped"
+fi
+
+# ---- 2. console keymap ----------------------------------------------------------------------
+KM=""
+for p in $($BB cat /proc/cmdline); do
+  case "$p" in
+    kyanite.keymap=*) KM=${p#kyanite.keymap=} ;;
+  esac
+done
+if [ -z "$KM" ] && [ -r /etc/kyanite/keymap ]; then
+  KM=$($BB cat /etc/kyanite/keymap)
+fi
+
+if [ -n "$KM" ] && [ "$KM" != us ]; then
+  LAYOUT=${KM%%-*}
+  FILE=""
+  for c in "/usr/share/bkeymaps/$LAYOUT/$KM.bmap.gz" "/usr/share/bkeymaps/$KM/$KM.bmap.gz"; do
+    if [ -f "$c" ]; then FILE=$c; break; fi
+  done
+  if [ -n "$FILE" ] && $BB zcat "$FILE" | $BB loadkmap 2>/dev/null; then
+    echo "$KM" > /run/kyanite/keymap
+    log "keymap $KM loaded"
+  else
+    log "keymap $KM could not be loaded"
+  fi
+fi
+
+exit 0

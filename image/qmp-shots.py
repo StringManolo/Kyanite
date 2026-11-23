@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Captura la pantalla de una VM de QEMU cada N segundos via QMP (no hace falta GUI).
+"""Take screenshots of a QEMU VM every N seconds through QMP (no GUI needed).
 
-Uso: qmp-shots.py SOCKET_QMP DIRECTORIO_SALIDA INTERVALO_SEGUNDOS
-Guarda frame-NNNNs.png (NNNN = segundos desde que arranco el script).
-Descarta los fotogramas identicos al anterior. Termina solo cuando QEMU se cierra.
+Usage: qmp-shots.py QMP_SOCKET OUTPUT_DIR INTERVAL_SECONDS
+Writes frame-NNNNs.png (NNNN = seconds since the script started).
+Frames identical to the previous one are discarded. Exits by itself when QEMU closes.
 """
 import hashlib
 import json
@@ -44,7 +44,7 @@ def cmd(name, **args):
 
 
 try:
-    f.readline()  # saludo de QMP
+    f.readline()  # QMP greeting
     cmd("qmp_capabilities")
     last = None
     while True:
