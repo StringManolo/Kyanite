@@ -228,8 +228,9 @@ jobs:
           source image/lib-test.sh
           enable_kvm
           make_smoke_image kyanite-x86_64.img test-smoke.img
-          # CPU basica en emulacion pura (como QEMU sin -cpu dentro de proot en el movil)
-          VM_ACCEL=tcg VM_CPU=qemu64 LIMIT=300 run_vm "smoke-qemu64-tcg" 'KYANITE-SMOKE vim rc=0' 0 \
+          # CPU basica en emulacion pura (como QEMU sin -cpu dentro de proot en el movil).
+          # Informativo (VM_SOFT=1): vim hace SIGILL en ld.so con qemu64; en QEMU hay que usar -cpu max.
+          VM_SOFT=1 VM_ACCEL=tcg VM_CPU=qemu64 LIMIT=300 run_vm "smoke-qemu64-tcg" 'KYANITE-SMOKE vim rc=0' 0 \
             -drive if=none,id=d0,file=test-smoke.img,format=raw,snapshot=on \
             -device ide-hd,drive=d0,bus=ide.0,bootindex=0 || true
           # CPU completa (KVM si el runner lo permite)

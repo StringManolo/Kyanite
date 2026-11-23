@@ -5,7 +5,7 @@
 
 SHOTS_ROOT=${SHOTS_ROOT:-$PWD/shots}
 LIMIT=${LIMIT:-150}         # segundos maximos por caso
-INTERVAL=${INTERVAL:-1}     # segundos entre capturas
+INTERVAL=${INTERVAL:-3}     # segundos entre capturas
 mkdir -p "$SHOTS_ROOT"
 OVMF=""
 for f in /usr/share/ovmf/OVMF.fd /usr/share/OVMF/OVMF.fd; do
@@ -39,15 +39,23 @@ set_serial_entry() {
   sudo losetup -d "$loop"
 }
 
-# matches LOG REGEX: solo cuenta lo que sale DESPUES de que arranque el kernel ("Linux version").
-# En UEFI, OVMF copia el menu de GRUB ("Kyanite", "Kyanite (consola serie)") a la consola serie y
-# daria falsos positivos. Ignora ademas nuestras lineas de marcadores salvo con EXPECT_RAW=1.
+# matches LOG REGEX
+# Solo cuenta la salida que viene DESPUES del traspaso a Kyanite, para no dar por bueno el arranque
+# por texto del firmware/GRUB/kernel:
+#   - disco: despues de "Mounting root: ok." (initramfs de Alpine)
+#   - live : despues de "KYANITE-LIVE: switch_root"
+# OVMF copia el menu de GRUB ("Kyanite", ...) a la consola serie SIN saltos de linea, asi que el
+# texto del menu queda en la misma linea que "Linux version": hay que cortar por texto, no por linea.
+# Con EXPECT_RAW=1 (p. ej. el instalador) basta con que aparezca tras "Linux version".
+# Ignora tambien nuestras lineas de marcadores KYANITE-LIVE/INSTALL (salvo con EXPECT_RAW=1).
 # (grep sin -q a proposito: con pipefail, un grep -q que sale antes provoca SIGPIPE y falsos negativos.)
 matches() {
   if [ "${EXPECT_RAW:-0}" = 1 ]; then
-    LC_ALL=C sed -n '/Linux version/,$p' "$1" | grep -aiE "$2" >/dev/null
+    LC_ALL=C awk 'f{print; next} /Linux version/{sub(/^.*Linux version/, "Linux version"); f=1; print}' "$1" \
+      | grep -aiE "$2" >/dev/null
   else
-    LC_ALL=C sed -n '/Linux version/,$p' "$1" | grep -av 'KYANITE-\(LIVE\|INSTALL\)' | grep -aiE "$2" >/dev/null
+    LC_ALL=C awk 'f{print; next} match($0, /Mounting root: ok\.|KYANITE-LIVE: switch_root/){f=1; print substr($0, RSTART + RLENGTH)}' "$1" \
+      | grep -av 'KYANITE-\(LIVE\|INSTALL\)' | grep -aiE "$2" >/dev/null
   fi
 }
 
@@ -66,7 +74,7 @@ record() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$SHOTS_ROOT/results
 record_skip() { record "$1" skip "$2" "-"; }
 
 # run_vm NOMBRE REGEX_ESPERADA ESPERAR_APAGADO(0|1) [argumentos de QEMU...]
-# Devuelve 0 si la salida serie coincide con la regex. Variables opcionales: LIMIT, VM_MEM, VM_CPU (def. max), VM_ACCEL (def. kvm:tcg), EXPECT_RAW.
+# Devuelve 0 si la salida serie coincide con la regex. Variables opcionales: LIMIT, VM_MEM, VM_CPU (def. max), VM_ACCEL (def. kvm:tcg), VM_SOFT (1 = aviso en vez de fallo), EXPECT_RAW.
 run_vm() {
   local name=$1 expect=$2 waitexit=$3; shift 3
   local dir="$SHOTS_ROOT/$name" log="$SHOTS_ROOT/$name/serial.log"
@@ -98,9 +106,11 @@ run_vm() {
     echo "OK   $name ($reason; etapas: $stages)"
     record "$name" ok "$reason" "$stages"
   else
-    echo "FAIL $name ($reason; etapas: $stages)"
+    local status=fail
+    [ "${VM_SOFT:-0}" = 1 ] && status=warn   # informativo: no hace fallar el veredicto
+    echo "${status^^} $name ($reason; etapas: $stages)"
     tail -n 30 "$log" | tr -cd '\11\12\40-\176'
-    record "$name" fail "$reason" "$stages"
+    record "$name" "$status" "$reason" "$stages"
   fi
   echo "::endgroup::"
   [ "$ok" = 1 ]

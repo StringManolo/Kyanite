@@ -60,7 +60,8 @@ if [ -n "$(ls -A "$OUT" 2>/dev/null)" ] && [ -n "${GH_TOKEN:-}" ] && [ -n "${REP
 fi
 BASE="https://raw.githubusercontent.com/${REPO:-}/ci-screenshots/runs/${RUN}"
 
-clean() { sed 's/\x1b\[[0-9;?]*[A-Za-z]//g' | tr -cd '\11\12\40-\176'; }
+# Quita secuencias de escape (CSI como ESC[6n o ESC[=3h; y las de 2 bytes como ESC7/ESC8) y deja texto plano.
+clean() { sed 's/\x1b\[[0-9;?=<>]*[A-Za-z]//g; s/\x1b[()][A-Za-z0-9]//g; s/\x1b[78=>]//g' | tr -cd '\11\12\40-\176'; }
 
 # --- resumen markdown -----------------------------------------------------------------------
 {
@@ -72,7 +73,7 @@ clean() { sed 's/\x1b\[[0-9;?]*[A-Za-z]//g' | tr -cd '\11\12\40-\176'; }
     echo "| Caso | Resultado | Motivo | Etapas vistas |"
     echo "|---|---|---|---|"
     while IFS=$'\t' read -r name status reason stages; do
-      case "$status" in ok) icon="OK";; fail) icon="FALLO";; *) icon="OMITIDO";; esac
+      case "$status" in ok) icon="OK";; fail) icon="FALLO";; warn) icon="AVISO";; *) icon="OMITIDO";; esac
       echo "| $name | $icon | $reason | $stages |"
     done < "$ROOT/results.tsv"
     echo
@@ -80,8 +81,8 @@ clean() { sed 's/\x1b\[[0-9;?]*[A-Za-z]//g' | tr -cd '\11\12\40-\176'; }
     echo "instalador = termino la instalacion. \"Salida esperada\" es el regex del input \`expect\`._"
     echo
     while IFS=$'\t' read -r name status reason stages; do
-      case "$status" in ok) icon="OK";; fail) icon="FALLO";; *) icon="OMITIDO";; esac
-      open=""; [ "$status" = fail ] && open=" open"
+      case "$status" in ok) icon="OK";; fail) icon="FALLO";; warn) icon="AVISO";; *) icon="OMITIDO";; esac
+      open=""; if [ "$status" = fail ] || [ "$status" = warn ]; then open=" open"; fi
       echo "<details$open><summary><b>$icon</b> $name - $reason ($stages)</summary>"
       echo
       if [ "$HOSTED" = 1 ] && [ -f "$OUT/$name/sheet.jpg" ]; then
