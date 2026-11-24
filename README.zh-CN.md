@@ -30,12 +30,83 @@ Kyanite 是一个小巧的 Linux 系统，便于携带，也易于使用。它�
 
 ### 在 Linux 上
 
-从 [Releases 页面](https://github.com/StringManolo/Kyanite/releases)下载根文件系统压缩包。提供两种架构：
+从 [Releases 页面](https://github.com/StringManolo/Kyanite/releases)下载根文件系统压缩包。提供三种架构：
 
 - `aarch64` (ARM64)
 - `x86_64` (AMD64)
+- `armv7` （32 位 ARM）
 
 每个版本都包含压缩包、它的 SHA256 校验和以及签名，方便你确认下载内容是真实的。请按照[安装指南](docs/zh-CN/installation.md)一步一步操作。
+
+想用虚拟机或 U 盘？还提供现成的 x86_64 磁盘镜像，可用于 QEMU、U 盘和 live ISO。请参阅 [x86_64 镜像指南](docs/zh-CN/x86_64-images.md)。例如用 QEMU：
+
+```sh
+qemu-system-x86_64 -m 1G -drive file=kyanite-x86_64.img,format=raw
+```
+
+### 在 Windows 上
+
+Kyanite 提供 x86_64 磁盘镜像，可配合常用的 Windows 软件使用。请从 release [x86_64 images for PC/Windows/Linux, QEMU, VirtualBox, VMware, etc.](https://github.com/StringManolo/Kyanite/releases/tag/qemuTest) 下载。
+
+| 软件 | 文件 |
+| --- | --- |
+| VirtualBox | `kyanite-x86_64.vdi` |
+| VMware | `kyanite-x86_64.vmdk` |
+| Rufus（以“DD 镜像”模式，从 U 盘启动真实 PC） | `kyanite-x86_64-hw-live.iso`，或 `kyanite-x86_64-hw.img.zip`（需先解压） |
+
+在真实 PC 上启动之前，请先阅读 [x86_64 镜像指南](docs/zh-CN/x86_64-images.md)：必须关闭 Secure Boot，且安装程序尚未在真实硬件上测试。
+
+### 使用 proot（任何 Linux 环境）
+
+[proot](https://proot-me.github.io/) 让你以普通用户身份运行一个根文件系统：无需 root，也不改动你的系统。它适用于大多数 Linux 环境，包括常规发行版、Android（Termux）、WSL 以及许多容器（前提是允许 `ptrace`）。Kyanite 的 Android 应用也使用它。
+
+```sh
+mkdir kyanite
+tar -xpf kyanite-rootfs-x86_64.tar.xz -C kyanite    # 64 位 ARM 请用 aarch64 压缩包，32 位 ARM 请用 armv7 压缩包
+
+proot -0 -r kyanite -b /dev -b /proc -b /sys -w /root \
+  /usr/bin/env -i HOME=/root TERM="$TERM" LANG=C.UTF-8 \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  /bin/sh -l
+```
+
+### 在 Termux 中
+
+有两种方式，都无需 root。
+
+**使用 proot-distro**（速度快：直接在手机上运行 Kyanite）。运行一次以下命令，把 Kyanite 注册为自定义发行版（它会自动选择适合你手机的压缩包）：
+
+```sh
+pkg install proot-distro curl
+PD=$(dpkg --print-architecture)                 # aarch64, arm or x86_64
+case "$PD" in arm) A=armv7 ;; *) A=$PD ;; esac  # name used by the Kyanite archives
+URL=https://github.com/StringManolo/Kyanite/releases/latest/download/kyanite-rootfs-$A.tar.xz
+SHA=$(curl -fsSL "$URL.sha256" | cut -d' ' -f1)
+cat > "$PREFIX/etc/proot-distro/kyanite.sh" <<EOF
+DISTRO_NAME="Kyanite"
+TARBALL_STRIP_OPT=0
+TARBALL_URL['$PD']="$URL"
+TARBALL_SHA256['$PD']="$SHA"
+EOF
+proot-distro install kyanite
+```
+
+之后每次要使用时：
+
+```sh
+proot-distro login kyanite -- /bin/sh -l
+```
+
+**使用 QEMU**（速度慢：模拟一整台 PC，但可以试用 x86_64 镜像）：
+
+```sh
+pkg install qemu-system-x86-64-headless unzip curl
+curl -LO https://github.com/StringManolo/Kyanite/releases/download/qemuTest/kyanite-x86_64.img.zip
+unzip kyanite-x86_64.img.zip
+qemu-system-x86_64 -m 1G -drive file=kyanite-x86_64.img,format=raw -vnc 127.0.0.1:0
+```
+
+然后在手机上打开 VNC 查看器应用，连接到 `127.0.0.1:5900`。其他显示画面的方法见 [x86_64 镜像指南](docs/zh-CN/x86_64-images.md)。
 
 ## 第一步
 
