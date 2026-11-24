@@ -13,6 +13,43 @@ for f in /usr/share/ovmf/OVMF.fd /usr/share/OVMF/OVMF.fd; do
   if [ -f "$f" ]; then OVMF=$f; break; fi
 done
 
+# OVMF with persistent variables (pflash). Needed to test that efibootmgr really registers a UEFI boot entry:
+# with `-bios OVMF.fd` the variable store is not writable, so SetVariable fails.
+OVMF_CODE=""
+OVMF_VARS_TEMPLATE=""
+for d in /usr/share/OVMF /usr/share/ovmf; do
+  for pair in "OVMF_CODE_4M.fd:OVMF_VARS_4M.fd" "OVMF_CODE.fd:OVMF_VARS.fd"; do
+    c=${pair%%:*}; v=${pair##*:}
+    if [ -z "$OVMF_CODE" ] && [ -f "$d/$c" ] && [ -f "$d/$v" ]; then
+      OVMF_CODE=$d/$c
+      OVMF_VARS_TEMPLATE=$d/$v
+    fi
+  done
+done
+
+# new_uefi_vars FILE -> fresh, writable copy of the OVMF variable store
+new_uefi_vars() { cp "$OVMF_VARS_TEMPLATE" "$1"; }
+
+# pflash_args VARS_FILE -> QEMU arguments for UEFI firmware with persistent variables (use instead of fw_args uefi)
+pflash_args() {
+  echo "-drive if=pflash,format=raw,unit=0,readonly=on,file=$OVMF_CODE -drive if=pflash,format=raw,unit=1,file=$1"
+}
+
+# remove_fallback_boot IMAGE [ESP_PARTITION_NUMBER]
+# Deletes EFI/BOOT/BOOTX64.EFI from the ESP, so that only a UEFI boot entry stored in the firmware variables
+# (registered by efibootmgr during the install) can boot the disk. Test-only; the installer always keeps the fallback.
+remove_fallback_boot() {
+  local img=$1 part=${2:-1} loop
+  loop=$(sudo losetup --find --show --partscan "$img")
+  sudo udevadm settle || true
+  wait_node "${loop}p${part}"
+  mkdir -p "$PWD/mnt/esp"
+  sudo mount -o iocharset=iso8859-1 "${loop}p${part}" "$PWD/mnt/esp"
+  sudo rm -f "$PWD/mnt/esp/EFI/BOOT/BOOTX64.EFI"
+  sudo umount "$PWD/mnt/esp"
+  sudo losetup -d "$loop"
+}
+
 enable_kvm() {
   echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
     | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null

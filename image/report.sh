@@ -109,6 +109,15 @@ clean() { sed 's/\x1b\[[0-9;?=<>]*[A-Za-z]//g; s/\x1b[()][A-Za-z0-9]//g; s/\x1b[
       echo
     done < "$ROOT/results.tsv"
   fi
+  if [ -s "$ROOT/buildinfo.txt" ]; then
+    echo "<details><summary><b>Build info</b> (rootfs release, kernel, package versions, file sizes)</summary>"
+    echo
+    echo '```'
+    cat "$ROOT/buildinfo.txt"
+    echo '```'
+    echo "</details>"
+    echo
+  fi
   if [ "$HOSTED" = 1 ]; then
     echo "Screenshots are published on the \`ci-screenshots\` branch (the last ${KEEP_RUNS} runs are kept)."
   else

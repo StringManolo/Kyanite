@@ -62,7 +62,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir rootfs
-          echo "Latest release: $(gh release view --repo "$REPO" --json tagName -q .tagName)"
+          TAG=$(gh release view --repo "$REPO" --json tagName -q .tagName)
+          echo "Latest release: $TAG"
+          echo "$TAG" > release-tag.txt
           gh release download --repo "$REPO" --pattern '*x86_64*.tar.xz' --dir rootfs
           gh release download --repo "$REPO" --pattern '*x86_64*.tar.xz.sha256' --dir rootfs || true
           [ "$(ls rootfs/*.tar.xz | wc -l)" = "1" ] || { echo "::error::Expected exactly one x86_64 tar.xz"; ls rootfs; exit 1; }
@@ -400,18 +402,26 @@ jobs:
           source image/lib-test.sh
           enable_kvm
           make_fake_windows_disk target-win.img
-          if EXPECT_RAW=1 LIMIT="$INSTALL_LIMIT" run_vm "install-alongside-uefi" "KYANITE-INSTALL-DONE" 1 $(fw_args uefi) \
+          new_uefi_vars vars-alongside.fd
+          if EXPECT_RAW=1 LIMIT="$INSTALL_LIMIT" run_vm "install-alongside-uefi" "KYANITE-INSTALL-DONE" 1 $(pflash_args vars-alongside.fd) \
               -drive if=none,id=cd0,file=test-install-alongside.iso,media=cdrom,readonly=on \
               -device ide-cd,drive=cd0,bus=ide.1,bootindex=0 \
               -drive if=none,id=d0,file=target-win.img,format=raw -device ide-hd,drive=d0,bus=ide.0; then
             verify_alongside target-win.img
             set_serial_entry target-win.img 3 boot/grub/grubenv
+            # 1) boot through the fallback path (fresh firmware variables)
             run_vm "installed-alongside-uefi" "$EXPECT" 0 $(fw_args uefi) \
+              -drive if=none,id=d0,file=target-win.img,format=raw,snapshot=on \
+              -device ide-hd,drive=d0,bus=ide.0,bootindex=0 || true
+            # 2) delete the fallback path: only the boot entry that efibootmgr stored in the firmware variables can boot it now
+            remove_fallback_boot target-win.img 1
+            run_vm "nvram-alongside-uefi" "$EXPECT" 0 $(pflash_args vars-alongside.fd) \
               -drive if=none,id=d0,file=target-win.img,format=raw,snapshot=on \
               -device ide-hd,drive=d0,bus=ide.0,bootindex=0 || true
           else
             record_skip alongside-verify "the alongside installation failed"
             record_skip installed-alongside-uefi "the alongside installation failed"
+            record_skip nvram-alongside-uefi "the alongside installation failed"
           fi
           exit 0
 
@@ -448,7 +458,8 @@ jobs:
 
           # UEFI: the root partition and the (existing) EFI System Partition are chosen explicitly
           make_manual_uefi_disk target-manual-uefi.img
-          if EXPECT_RAW=1 LIMIT="$INSTALL_LIMIT" run_vm "install-manual-uefi" "KYANITE-INSTALL-DONE" 1 $(fw_args uefi) \
+          new_uefi_vars vars-manual.fd
+          if EXPECT_RAW=1 LIMIT="$INSTALL_LIMIT" run_vm "install-manual-uefi" "KYANITE-INSTALL-DONE" 1 $(pflash_args vars-manual.fd) \
               -drive if=none,id=cd0,file=test-manual-uefi.iso,media=cdrom,readonly=on \
               -device ide-cd,drive=cd0,bus=ide.1,bootindex=0 \
               -drive if=none,id=d0,file=target-manual-uefi.img,format=raw -device ide-hd,drive=d0,bus=ide.0; then
@@ -457,9 +468,14 @@ jobs:
             run_vm "installed-manual-uefi" "$EXPECT" 0 $(fw_args uefi) \
               -drive if=none,id=d0,file=target-manual-uefi.img,format=raw,snapshot=on \
               -device ide-hd,drive=d0,bus=ide.0,bootindex=0 || true
+            remove_fallback_boot target-manual-uefi.img 1
+            run_vm "nvram-manual-uefi" "$EXPECT" 0 $(pflash_args vars-manual.fd) \
+              -drive if=none,id=d0,file=target-manual-uefi.img,format=raw,snapshot=on \
+              -device ide-hd,drive=d0,bus=ide.0,bootindex=0 || true
           else
             record_skip manual-uefi-verify "the manual UEFI installation failed"
             record_skip installed-manual-uefi "the manual UEFI installation failed"
+            record_skip nvram-manual-uefi "the manual UEFI installation failed"
           fi
 
           # BIOS + MBR: GRUB goes to the MBR of the disk that holds the chosen root partition
@@ -478,6 +494,32 @@ jobs:
             record_skip installed-manual-bios "the manual BIOS installation failed"
           fi
           exit 0
+
+      - name: Build info (versions and sizes)
+        if: always()
+        run: |
+          mkdir -p shots
+          {
+            echo "variant: $VARIANT   kernel flavor: $FLAVOR"
+            echo "rootfs release: $(cat release-tag.txt 2>/dev/null || echo unknown)"
+            if ls rootfs/*.tar.xz >/dev/null 2>&1; then
+              echo "rootfs tar.xz: $(stat -c %s rootfs/*.tar.xz) bytes, sha256 $(sha256sum rootfs/*.tar.xz | cut -c1-16)..."
+            fi
+            echo "kernel: $(cat kernel-out/kver 2>/dev/null || echo unknown)"
+            echo
+            echo "file sizes (bytes):"
+            ls -l "$NAME".img "$NAME".vdi "$NAME".vmdk "$NAME-live.iso" isodir/kyanite/*.squashfs \
+              kernel-out/vmlinuz kernel-out/initramfs kernel-out/initramfs-live 2>/dev/null \
+              | awk '{printf "  %12d  %s\n", $5, $9}'
+            echo "  rootfs tree: $(sudo du -sm stage/root 2>/dev/null | cut -f1) MB | installer layer: $(sudo du -sm stage/installer 2>/dev/null | cut -f1) MB | firmware: $(du -sm kernel-out/firmware 2>/dev/null | cut -f1) MB"
+            echo
+            echo "Alpine packages (kernel container):"
+            sed 's/^/  /' kernel-out/versions.txt 2>/dev/null
+            echo
+            echo "Alpine packages (installer layer):"
+            sudo awk '/^P:/{p=substr($0,3)} /^V:/{print "  " p "-" substr($0,3)}' stage/installer/lib/apk/db/installed 2>/dev/null | sort
+          } > shots/buildinfo.txt
+          cat shots/buildinfo.txt
 
       - name: Report with screenshots (job summary)
         if: always()

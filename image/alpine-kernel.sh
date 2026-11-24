@@ -69,5 +69,11 @@ if [ "${VARIANT:-vm}" = hardware ]; then
   du -sh /out/firmware
 fi
 
+# Versions of what went into this build (shown in the job summary)
+{
+  apk info -v "linux-$FLAVOR" mkinitfs busybox-static kbd-bkeymaps 2>/dev/null
+  apk list -I 2>/dev/null | grep -E 'firmware|sof-' || true
+} > /out/versions.txt
+
 chmod -R a+rX /out
 ls -lh /out

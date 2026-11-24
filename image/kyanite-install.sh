@@ -273,11 +273,12 @@ install_uefi_rootboot() {
 
   # UEFI boot entry (best effort: the fallback path already makes the disk bootable)
   if command -v efibootmgr >/dev/null 2>&1; then
-    if efibootmgr --create --disk "$espdisk" --part "$espn" --loader '\EFI\Kyanite\grubx64.efi' \
-        --label "Kyanite" >/dev/null 2>&1; then
+    ebm=$(efibootmgr --create --disk "$espdisk" --part "$espn" --loader '\EFI\Kyanite\grubx64.efi' \
+        --label "Kyanite" 2>&1) && ebm_rc=0 || ebm_rc=$?
+    if [ "$ebm_rc" -eq 0 ]; then
       say "UEFI boot entry registered"
     else
-      say "warning: could not register a UEFI boot entry (the fallback path is installed)"
+      say "warning: could not register a UEFI boot entry (the fallback path is installed): $(printf '%s\n' "$ebm" | tail -n 1)"
     fi
   fi
 }
