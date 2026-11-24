@@ -40,7 +40,7 @@ Each release includes the archive, its SHA256 checksum and a signature, so you c
 
 Prefer a virtual machine or a USB stick? There are also ready-made x86_64 disk images for QEMU, USB sticks and a live ISO. See the [x86_64 images guide](docs/x86_64-images.md). For example, with QEMU:
 
-```sh
+```bash
 qemu-system-x86_64 -m 1G -drive file=kyanite-x86_64.img,format=raw
 ```
 
