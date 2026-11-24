@@ -22,11 +22,17 @@ Kyanite 是一个小巧的 Linux 系统，便于携带，也易于使用。它�
 
 ### 在 Android 上（最简单）
 
-1. [**下载适用于 Android 的 Kyanite (.apk)**](https://github.com/StringManolo/KyaniteAndroid/releases/latest/download/Kyanite.apk)
+1. 下载适用于 Android 的 Kyanite (.apk)：
+   - [**64 位**（大多数手机）](https://github.com/StringManolo/KyaniteAndroid/releases/latest/download/Kyanite.apk)
+   - [32 位（较旧的手机）](https://github.com/StringManolo/KyaniteAndroid/releases/latest/download/kyanite_v7.apk)
 2. 打开下载的文件并安装（Android 可能会要求你允许从此来源安装应用）。
 3. 打开应用，在第一个界面选择如何启动 Kyanite。
 
-更多详情请见 [Android 指南](docs/zh-CN/android.md)。源代码：[KyaniteAndroid](https://github.com/StringManolo/KyaniteAndroid)。
+不确定该下载哪个？[Kyanite 网站](https://stringmanolo.github.io/KyaniteAndroid/zh-CN/)会为你推荐合适的版本；如果其中一个无法安装，请试试另一个。更多详情请见 [Android 指南](docs/zh-CN/android.md)。源代码：[KyaniteAndroid](https://github.com/StringManolo/KyaniteAndroid)。
+
+### 在 Windows 上
+
+在 VirtualBox、VMware 或 QEMU 中运行 Kyanite，或用 Rufus 从 U 盘启动真实电脑。请参阅 [Windows 指南](docs/zh-CN/installation.md#windows)。
 
 ### 在 Linux 上
 
@@ -34,110 +40,13 @@ Kyanite 是一个小巧的 Linux 系统，便于携带，也易于使用。它�
 
 - `aarch64` (ARM64)
 - `x86_64` (AMD64)
-- `armv7` （32 位 ARM）
+- `armv7`（32 位 ARM）
 
-每个版本都包含压缩包、它的 SHA256 校验和以及签名，方便你确认下载内容是真实的。请按照[安装指南](docs/zh-CN/installation.md)一步一步操作。
-
-想用虚拟机或 U 盘？还提供现成的 x86_64 磁盘镜像，可用于 QEMU、U 盘和 live ISO。请参阅 [x86_64 镜像指南](docs/zh-CN/x86_64-images.md)。例如用 QEMU：
-
-```sh
-qemu-system-x86_64 -m 1G -drive file=kyanite-x86_64.img,format=raw
-```
-
-### 在 Windows 上
-
-Kyanite 提供 x86_64 磁盘镜像，可配合常用的 Windows 软件使用。请从 release [x86_64 images for PC/Windows/Linux, QEMU, VirtualBox, VMware, etc.](https://github.com/StringManolo/Kyanite/releases/tag/qemuTest) 下载。
-
-| 软件 | 文件 |
-| --- | --- |
-| VirtualBox | `kyanite-x86_64.vdi` |
-| VMware | `kyanite-x86_64.vmdk` |
-| Rufus（以“DD 镜像”模式，从 U 盘启动真实 PC） | `kyanite-x86_64-hw-live.iso`，或 `kyanite-x86_64-hw.img.zip`（需先解压） |
-
-在真实 PC 上启动之前，请先阅读 [x86_64 镜像指南](docs/zh-CN/x86_64-images.md)：必须关闭 Secure Boot，且安装程序尚未在真实硬件上测试。
-
-### 使用 proot（任何 Linux 环境）
-
-[proot](https://proot-me.github.io/) 让你以普通用户身份运行一个根文件系统：无需 root，也不改动你的系统。它适用于大多数 Linux 环境，包括常规发行版、Android（Termux）、WSL 以及许多容器（前提是允许 `ptrace`）。Kyanite 的 Android 应用也使用它。
-
-```sh
-mkdir kyanite
-tar -xpf kyanite-rootfs-x86_64.tar.xz -C kyanite    # 64 位 ARM 请用 aarch64 压缩包，32 位 ARM 请用 armv7 压缩包
-
-proot -0 -r kyanite -b /dev -b /proc -b /sys -w /root \
-  /usr/bin/env -i HOME=/root TERM="$TERM" LANG=C.UTF-8 \
-  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-  /bin/sh -l
-```
+每个版本都包含压缩包、它的 SHA256 校验和以及签名，方便你确认下载内容是真实的。请按照 [Linux 指南](docs/zh-CN/installation.md#linux)一步一步操作。你也可以使用 [Docker](docs/zh-CN/installation.md#docker)。
 
 ### 在 Termux 中
 
-有两种方式，都无需 root。
-
-**使用 proot-distro**（速度快：直接在手机上运行 Kyanite）。运行一次以下命令，把 Kyanite 注册为自定义发行版（它会自动选择适合你手机的压缩包）：
-
-```sh
-NAME=kyanite
-BASE=https://github.com/StringManolo/Kyanite/releases/latest/download
-: "${PREFIX:?run this inside Termux}"
-
-# Archive name for this phone (dpkg uses Termux's own architecture names: aarch64, arm, x86_64)
-case "$(dpkg --print-architecture)" in
-  aarch64) ARCH=aarch64 ;;
-  arm)     ARCH=armv7 ;;
-  x86_64)  ARCH=x86_64 ;;
-  *) echo "Unsupported architecture: $(dpkg --print-architecture)" >&2; exit 1 ;;
-esac
-FILE="kyanite-rootfs-$ARCH.tar.xz"
-
-pkg install -y proot-distro curl
-
-if [ -d "$PREFIX/var/lib/proot-distro/containers/$NAME" ]; then
-  echo "Kyanite is already installed (remove it first with: proot-distro remove $NAME)."
-else
-  TMP=$(mktemp -d)
-  trap 'rm -rf "$TMP"' EXIT
-  echo "Downloading $FILE ..."
-  curl -fL --progress-bar -o "$TMP/$FILE" "$BASE/$FILE"
-  curl -fsSL -o "$TMP/$FILE.sha256" "$BASE/$FILE.sha256"
-  echo "Checking the SHA256 checksum ..."
-  (cd "$TMP" && sha256sum -c "$FILE.sha256")
-  proot-distro install "$TMP/$FILE" --name "$NAME"
-fi
-
-# `kyanite`          -> opens a shell
-# `kyanite COMMAND`  -> runs COMMAND and exits
-cat > "$PREFIX/bin/kyanite" <<LAUNCHER
-#!$PREFIX/bin/sh
-if [ "\$#" -eq 0 ]; then
-  exec proot-distro login $NAME
-else
-  exec proot-distro login $NAME -- "\$@"
-fi
-LAUNCHER
-chmod 755 "$PREFIX/bin/kyanite"
-
-echo
-echo "Done. Type  kyanite  to start it."
-echo "To remove it:  proot-distro remove $NAME && rm \"$PREFIX/bin/kyanite\""
-```
-
-之后每次要使用时：
-
-```sh
-kyanite
-```
-
-**使用 QEMU**（速度慢：模拟一整台 PC，但可以试用 x86_64 镜像）：
-
-```sh
-pkg install qemu-system-x86-64-headless unzip curl
-curl -LO https://github.com/StringManolo/Kyanite/releases/download/qemuTest/kyanite-x86_64.img.zip
-unzip kyanite-x86_64.img.zip
-qemu-system-x86_64 -m 1G -drive file=kyanite-x86_64.img,format=raw -vnc 127.0.0.1:0
-```
-
-然后在手机上打开 VNC 查看器应用，连接到 `127.0.0.1:5900`。其他显示画面的方法见 [x86_64 镜像指南](docs/zh-CN/x86_64-images.md)。
+在 Termux 中通过 proot-distro 或 QEMU，在手机上运行 Kyanite。请参阅 [Termux 指南](docs/zh-CN/installation.md#termux)。
 
 ## 第一步
 
@@ -177,7 +86,7 @@ kpkg add curl
 | --- | --- |
 | [术语表](docs/zh-CN/glossary.md) | 用通俗语言解释技术词汇 |
 | [Android 指南](docs/zh-CN/android.md) | 在手机上使用 Kyanite |
-| [安装](docs/zh-CN/installation.md) | 下载、验证和启动 Kyanite |
+| [安装](docs/zh-CN/installation.md) | 在 Android、Windows、Linux、Termux 和 Docker 上分步安装 |
 | [x86_64 镜像](docs/zh-CN/x86_64-images.md) | 适用于 PC 和虚拟机（QEMU、VirtualBox、VMware）的磁盘镜像 |
 | [使用](docs/zh-CN/usage.md) | Shell 环境与自定义 |
 | [包管理器 (`kpkg`)](docs/zh-CN/kpkg.md) | 命令、选项和包管理 |

@@ -1,10 +1,8 @@
-🇷🇺 Русский | [🇺🇸 English](../x86_64-images.md) | [🇪🇸 Español](../es/x86_64-images.md) | [🇨🇳 简体中文](../zh-CN/x86_64-images.md)
-
 # Образы x86_64
 
 Kyanite также поставляется с готовыми образами дисков для x86_64: для ПК, виртуальных машин и компьютеров с Windows или Linux. Они опубликованы в релизе GitHub [x86_64 images for PC/Windows/Linux, QEMU, VirtualBox, VMware, etc.](https://github.com/StringManolo/Kyanite/releases/tag/qemuTest).
 
-Нужны архивы корневой файловой системы (`aarch64` / `x86_64`)? См. [руководство по установке](installation.md).
+Пошаговые инструкции (VirtualBox, VMware, QEMU, Rufus и USB-накопители) — в [руководстве по установке](installation.md). Нужны архивы корневой файловой системы (`aarch64` / `x86_64`)? См. [руководство по установке](installation.md).
 
 > ⚠️ Установщик в live-ISO **пока не проверен на реальном оборудовании** и может безвозвратно удалить все ваши файлы. Если вы не уверены в своих действиях, не запускайте его. Сначала сделайте резервную копию данных.
 
@@ -19,46 +17,15 @@ Kyanite также поставляется с готовыми образами
 | Записать USB-накопитель для реального ПК, **с** прошивками | `kyanite-x86_64-hw.img.zip` |
 | Обычный live-CD Linux (со скриптом установки) | `kyanite-x86_64-hw-live.iso` |
 
-## QEMU (BIOS)
+## Что вы увидите
+
+Так Kyanite запускается в QEMU: меню GRUB, а затем система.
 
 <img width="720" height="391" alt="Kyanite GRUB menu in QEMU" src="https://github.com/user-attachments/assets/032289ef-c50f-4e2f-b491-79b66ea7fecb" />
 
-Это просто моя конфигурация; можно использовать любую другую.
-
-1. Установите Termux и Termux:X11.
-2. Выполните в Termux:
-
-```bash
-termux-x11 :0 -listen tcp -ac
-```
-
-3. Выполните в [DebianLiveCD4Android](https://github.com/StringManolo/DebianLiveCD4Android) с rootfs Alpine (предполагается, что `qemu-system-x86_64` уже установлен):
-
-```bash
-apk add qemu-ui-gtk
-unset SDL_VIDEODRIVER
-export DISPLAY=127.0.0.1:0
-qemu-system-x86_64 -m 1G -drive file=kyanite-x86_64.img,format=raw -display gtk -vga std
-```
-
-4. Откройте приложение Termux:X11, и вы увидите BIOS.
-
 <img width="720" height="395" alt="Kyanite booting in QEMU" src="https://github.com/user-attachments/assets/5f5197f0-e16f-4dba-b45b-0e99b841d2ba" />
 
-## VirtualBox
-
-Используйте `kyanite-x86_64.vdi`.
-
-## VMware
-
-Используйте `kyanite-x86_64.vmdk`.
-
-## Rufus (USB-накопитель)
-
-Сначала распакуйте zip и запишите `.img` в режиме **DD Image**. Образ находится на собственном виртуальном диске.
-
-- `kyanite-x86_64.img.zip`: прошивки **не** включены.
-- `kyanite-x86_64-hw.img.zip`: прошивки **включены**.
+## Почему образы для Rufus в zip-архиве?
 
 Образы распространяются в zip-архиве, потому что в сжатом виде они меньше примерно на 90 %: внутри виртуальный диск с более чем 500 МБ нулей в качестве дополнительного пространства. После распаковки они могут занимать до 1,6 ГБ.
 

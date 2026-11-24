@@ -22,11 +22,17 @@ New to Linux? The [glossary](docs/glossary.md) explains the technical words used
 
 ### On Android (easiest)
 
-1. [**Download Kyanite for Android (.apk)**](https://github.com/StringManolo/KyaniteAndroid/releases/latest/download/Kyanite.apk)
+1. Download Kyanite for Android (.apk):
+   - [**64-bit** (most phones)](https://github.com/StringManolo/KyaniteAndroid/releases/latest/download/Kyanite.apk)
+   - [32-bit (older phones)](https://github.com/StringManolo/KyaniteAndroid/releases/latest/download/kyanite_v7.apk)
 2. Open the downloaded file and install it (Android may ask you to allow installing apps from this source).
 3. Open the app and choose how to start Kyanite on the first screen.
 
-More details in the [Android guide](docs/android.md). Source code: [KyaniteAndroid](https://github.com/StringManolo/KyaniteAndroid).
+Not sure which one to download? The [Kyanite website](https://stringmanolo.github.io/KyaniteAndroid/en/) suggests the right one, and if one does not install, try the other. More details in the [Android guide](docs/android.md). Source code: [KyaniteAndroid](https://github.com/StringManolo/KyaniteAndroid).
+
+### On Windows
+
+Run Kyanite in VirtualBox, VMware or QEMU, or start a real PC from a USB stick with Rufus. See the [Windows guide](docs/installation.md#windows).
 
 ### On Linux
 
@@ -36,108 +42,11 @@ Download a root filesystem archive from the [Releases page](https://github.com/S
 - `x86_64` (AMD64)
 - `armv7` (32-bit ARM)
 
-Each release includes the archive, its SHA256 checksum and a signature, so you can check that the download is genuine. Follow the [installation guide](docs/installation.md) step by step.
-
-Prefer a virtual machine or a USB stick? There are also ready-made x86_64 disk images for QEMU, USB sticks and a live ISO. See the [x86_64 images guide](docs/x86_64-images.md). For example, with QEMU:
-
-```bash
-qemu-system-x86_64 -m 1G -drive file=kyanite-x86_64.img,format=raw
-```
-
-### On Windows
-
-Kyanite has x86_64 disk images that work with the usual Windows programs. Download them from the release [x86_64 images for PC/Windows/Linux, QEMU, VirtualBox, VMware, etc.](https://github.com/StringManolo/Kyanite/releases/tag/qemuTest).
-
-| Program | File |
-| --- | --- |
-| VirtualBox | `kyanite-x86_64.vdi` |
-| VMware | `kyanite-x86_64.vmdk` |
-| Rufus (to boot a real PC from a USB stick, in "DD Image" mode) | `kyanite-x86_64-hw-live.iso`, or `kyanite-x86_64-hw.img.zip` (extract it first) |
-
-Before booting a real PC, read the [x86_64 images guide](docs/x86_64-images.md): Secure Boot must be off, and the installer has not been tested on real hardware yet.
-
-### With proot (any Linux environment)
-
-[proot](https://proot-me.github.io/) runs a root filesystem as a normal user: no root, no changes to your system. It works on most Linux environments, including regular distributions, Android (Termux), WSL and many containers (as long as `ptrace` is allowed). The Kyanite app for Android uses it too.
-
-```sh
-mkdir kyanite
-tar -xpf kyanite-rootfs-x86_64.tar.xz -C kyanite    # on 64-bit ARM use the aarch64 archive, on 32-bit ARM the armv7 one
-
-proot -0 -r kyanite -b /dev -b /proc -b /sys -w /root \
-  /usr/bin/env -i HOME=/root TERM="$TERM" LANG=C.UTF-8 \
-  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-  /bin/sh -l
-```
+Each release includes the archive, its SHA256 checksum and a signature, so you can check that the download is genuine. Follow the [Linux guide](docs/installation.md#linux) step by step. You can also use [Docker](docs/installation.md#docker).
 
 ### In Termux
 
-There are two ways, both without root.
-
-**With proot-distro** (fast: it runs Kyanite directly on your phone). Run this once to register Kyanite as a custom distribution (it picks the archive that matches your phone):
-
-```sh
-NAME=kyanite
-BASE=https://github.com/StringManolo/Kyanite/releases/latest/download
-: "${PREFIX:?run this inside Termux}"
-
-# Archive name for this phone (dpkg uses Termux's own architecture names: aarch64, arm, x86_64)
-case "$(dpkg --print-architecture)" in
-  aarch64) ARCH=aarch64 ;;
-  arm)     ARCH=armv7 ;;
-  x86_64)  ARCH=x86_64 ;;
-  *) echo "Unsupported architecture: $(dpkg --print-architecture)" >&2; exit 1 ;;
-esac
-FILE="kyanite-rootfs-$ARCH.tar.xz"
-
-pkg install -y proot-distro curl
-
-if [ -d "$PREFIX/var/lib/proot-distro/containers/$NAME" ]; then
-  echo "Kyanite is already installed (remove it first with: proot-distro remove $NAME)."
-else
-  TMP=$(mktemp -d)
-  trap 'rm -rf "$TMP"' EXIT
-  echo "Downloading $FILE ..."
-  curl -fL --progress-bar -o "$TMP/$FILE" "$BASE/$FILE"
-  curl -fsSL -o "$TMP/$FILE.sha256" "$BASE/$FILE.sha256"
-  echo "Checking the SHA256 checksum ..."
-  (cd "$TMP" && sha256sum -c "$FILE.sha256")
-  proot-distro install "$TMP/$FILE" --name "$NAME"
-fi
-
-# `kyanite`          -> opens a shell
-# `kyanite COMMAND`  -> runs COMMAND and exits
-cat > "$PREFIX/bin/kyanite" <<LAUNCHER
-#!$PREFIX/bin/sh
-if [ "\$#" -eq 0 ]; then
-  exec proot-distro login $NAME
-else
-  exec proot-distro login $NAME -- "\$@"
-fi
-LAUNCHER
-chmod 755 "$PREFIX/bin/kyanite"
-
-echo
-echo "Done. Type  kyanite  to start it."
-echo "To remove it:  proot-distro remove $NAME && rm \"$PREFIX/bin/kyanite\""
-```
-
-Then, whenever you want to use it:
-
-```sh
-kyanite
-```
-
-**With QEMU** (slow: it emulates a whole PC, but lets you try the x86_64 images):
-
-```sh
-pkg install qemu-system-x86-64-headless unzip curl
-curl -LO https://github.com/StringManolo/Kyanite/releases/download/qemuTest/kyanite-x86_64.img.zip
-unzip kyanite-x86_64.img.zip
-qemu-system-x86_64 -m 1G -drive file=kyanite-x86_64.img,format=raw -vnc 127.0.0.1:0
-```
-
-Then open a VNC viewer app on the phone and connect to `127.0.0.1:5900`. Other ways of showing the screen are described in the [x86_64 images guide](docs/x86_64-images.md).
+Run Kyanite on your phone from Termux, with proot-distro or QEMU. See the [Termux guide](docs/installation.md#termux).
 
 ## Your first steps
 
@@ -177,7 +86,7 @@ Want to know how the pieces fit together? Read the [architecture guide](docs/arc
 | --- | --- |
 | [Glossary](docs/glossary.md) | Technical words explained in plain language |
 | [Android guide](docs/android.md) | Using Kyanite on your phone |
-| [Installation](docs/installation.md) | Downloading, verifying and starting Kyanite |
+| [Installation](docs/installation.md) | Step-by-step installation on Android, Windows, Linux, Termux and Docker |
 | [x86_64 images](docs/x86_64-images.md) | Disk images for PCs and virtual machines (QEMU, VirtualBox, VMware) |
 | [Usage](docs/usage.md) | Shell environment and customization |
 | [Package manager (`kpkg`)](docs/kpkg.md) | Commands, options and package management |

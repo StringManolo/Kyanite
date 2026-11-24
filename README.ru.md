@@ -22,11 +22,17 @@ Kyanite — это небольшая Linux-система, которую ле�
 
 ### На Android (проще всего)
 
-1. [**Скачайте Kyanite для Android (.apk)**](https://github.com/StringManolo/KyaniteAndroid/releases/latest/download/Kyanite.apk)
+1. Скачайте Kyanite для Android (.apk):
+   - [**64-битная** (большинство телефонов)](https://github.com/StringManolo/KyaniteAndroid/releases/latest/download/Kyanite.apk)
+   - [32-битная (старые телефоны)](https://github.com/StringManolo/KyaniteAndroid/releases/latest/download/kyanite_v7.apk)
 2. Откройте скачанный файл и установите его (Android может попросить разрешить установку приложений из этого источника).
 3. Откройте приложение и на первом экране выберите, как запускать Kyanite.
 
-Подробности — в [руководстве по Android](docs/ru/android.md). Исходный код: [KyaniteAndroid](https://github.com/StringManolo/KyaniteAndroid).
+Не уверены, какую скачать? [Сайт Kyanite](https://stringmanolo.github.io/KyaniteAndroid/ru/) подскажет подходящую, а если одна не устанавливается, попробуйте другую. Подробности — в [руководстве по Android](docs/ru/android.md). Исходный код: [KyaniteAndroid](https://github.com/StringManolo/KyaniteAndroid).
+
+### На Windows
+
+Запустите Kyanite в VirtualBox, VMware или QEMU либо загрузите настоящий компьютер с USB-накопителя через Rufus. См. [руководство для Windows](docs/ru/installation.md#windows).
 
 ### На Linux
 
@@ -36,108 +42,11 @@ Kyanite — это небольшая Linux-система, которую ле�
 - `x86_64` (AMD64)
 - `armv7` (32-битный ARM)
 
-Каждый релиз включает архив, его контрольную сумму SHA256 и подпись, чтобы вы могли убедиться в подлинности загрузки. Следуйте [руководству по установке](docs/ru/installation.md) шаг за шагом.
-
-Хотите виртуальную машину или USB-накопитель? Есть также готовые образы дисков x86_64 — для QEMU, USB-накопителей и live-ISO. См. [руководство по образам x86_64](docs/ru/x86_64-images.md). Например, с QEMU:
-
-```sh
-qemu-system-x86_64 -m 1G -drive file=kyanite-x86_64.img,format=raw
-```
-
-### На Windows
-
-У Kyanite есть образы дисков x86_64, которые работают с привычными программами для Windows. Скачайте их в релизе [x86_64 images for PC/Windows/Linux, QEMU, VirtualBox, VMware, etc.](https://github.com/StringManolo/Kyanite/releases/tag/qemuTest).
-
-| Программа | Файл |
-| --- | --- |
-| VirtualBox | `kyanite-x86_64.vdi` |
-| VMware | `kyanite-x86_64.vmdk` |
-| Rufus (чтобы загрузить настоящий ПК с USB-накопителя, режим «DD Image») | `kyanite-x86_64-hw-live.iso` или `kyanite-x86_64-hw.img.zip` (сначала распакуйте) |
-
-Перед загрузкой настоящего ПК прочитайте [руководство по образам x86_64](docs/ru/x86_64-images.md): Secure Boot должен быть отключён, а установщик пока не проверен на реальном оборудовании.
-
-### С proot (в любой среде Linux)
-
-[proot](https://proot-me.github.io/) запускает корневую файловую систему от имени обычного пользователя: без root и без изменений в вашей системе. Он работает в большинстве сред Linux: в обычных дистрибутивах, Android (Termux), WSL и многих контейнерах (если разрешён `ptrace`). Приложение Kyanite для Android тоже использует его.
-
-```sh
-mkdir kyanite
-tar -xpf kyanite-rootfs-x86_64.tar.xz -C kyanite    # на 64-битном ARM берите архив aarch64, на 32-битном — armv7
-
-proot -0 -r kyanite -b /dev -b /proc -b /sys -w /root \
-  /usr/bin/env -i HOME=/root TERM="$TERM" LANG=C.UTF-8 \
-  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-  /bin/sh -l
-```
+Каждый релиз включает архив, его контрольную сумму SHA256 и подпись, чтобы вы могли убедиться в подлинности загрузки. Следуйте [руководству для Linux](docs/ru/installation.md#linux) шаг за шагом. Можно также использовать [Docker](docs/ru/installation.md#docker).
 
 ### В Termux
 
-Есть два способа, оба без root.
-
-**Через proot-distro** (быстро: Kyanite запускается прямо на телефоне). Выполните это один раз, чтобы зарегистрировать Kyanite как пользовательский дистрибутив (он сам выбирает архив для вашего телефона):
-
-```sh
-NAME=kyanite
-BASE=https://github.com/StringManolo/Kyanite/releases/latest/download
-: "${PREFIX:?run this inside Termux}"
-
-# Archive name for this phone (dpkg uses Termux's own architecture names: aarch64, arm, x86_64)
-case "$(dpkg --print-architecture)" in
-  aarch64) ARCH=aarch64 ;;
-  arm)     ARCH=armv7 ;;
-  x86_64)  ARCH=x86_64 ;;
-  *) echo "Unsupported architecture: $(dpkg --print-architecture)" >&2; exit 1 ;;
-esac
-FILE="kyanite-rootfs-$ARCH.tar.xz"
-
-pkg install -y proot-distro curl
-
-if [ -d "$PREFIX/var/lib/proot-distro/containers/$NAME" ]; then
-  echo "Kyanite is already installed (remove it first with: proot-distro remove $NAME)."
-else
-  TMP=$(mktemp -d)
-  trap 'rm -rf "$TMP"' EXIT
-  echo "Downloading $FILE ..."
-  curl -fL --progress-bar -o "$TMP/$FILE" "$BASE/$FILE"
-  curl -fsSL -o "$TMP/$FILE.sha256" "$BASE/$FILE.sha256"
-  echo "Checking the SHA256 checksum ..."
-  (cd "$TMP" && sha256sum -c "$FILE.sha256")
-  proot-distro install "$TMP/$FILE" --name "$NAME"
-fi
-
-# `kyanite`          -> opens a shell
-# `kyanite COMMAND`  -> runs COMMAND and exits
-cat > "$PREFIX/bin/kyanite" <<LAUNCHER
-#!$PREFIX/bin/sh
-if [ "\$#" -eq 0 ]; then
-  exec proot-distro login $NAME
-else
-  exec proot-distro login $NAME -- "\$@"
-fi
-LAUNCHER
-chmod 755 "$PREFIX/bin/kyanite"
-
-echo
-echo "Done. Type  kyanite  to start it."
-echo "To remove it:  proot-distro remove $NAME && rm \"$PREFIX/bin/kyanite\""
-```
-
-Затем каждый раз, когда нужно:
-
-```sh
-kyanite
-```
-
-**Через QEMU** (медленно: эмулируется целый ПК, зато можно попробовать образы x86_64):
-
-```sh
-pkg install qemu-system-x86-64-headless unzip curl
-curl -LO https://github.com/StringManolo/Kyanite/releases/download/qemuTest/kyanite-x86_64.img.zip
-unzip kyanite-x86_64.img.zip
-qemu-system-x86_64 -m 1G -drive file=kyanite-x86_64.img,format=raw -vnc 127.0.0.1:0
-```
-
-Затем откройте на телефоне приложение-клиент VNC и подключитесь к `127.0.0.1:5900`. Другие способы показать экран описаны в [руководстве по образам x86_64](docs/ru/x86_64-images.md).
+Запустите Kyanite на телефоне из Termux через proot-distro или QEMU. См. [руководство для Termux](docs/ru/installation.md#termux).
 
 ## Первые шаги
 
@@ -177,7 +86,7 @@ kpkg add curl
 | --- | --- |
 | [Глоссарий](docs/ru/glossary.md) | Технические слова простым языком |
 | [Руководство по Android](docs/ru/android.md) | Использование Kyanite на телефоне |
-| [Установка](docs/ru/installation.md) | Загрузка, проверка и запуск Kyanite |
+| [Установка](docs/ru/installation.md) | Пошаговая установка на Android, Windows, Linux, Termux и Docker |
 | [Образы x86_64](docs/ru/x86_64-images.md) | Образы дисков для ПК и виртуальных машин (QEMU, VirtualBox, VMware) |
 | [Использование](docs/ru/usage.md) | Окружение оболочки и настройка |
 | [Менеджер пакетов (`kpkg`)](docs/ru/kpkg.md) | Команды, параметры и управление пакетами |

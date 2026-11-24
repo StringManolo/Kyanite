@@ -1,10 +1,8 @@
-🇺🇸 English | [🇪🇸 Español](es/x86_64-images.md) | [🇷🇺 Русский](ru/x86_64-images.md) | [🇨🇳 简体中文](zh-CN/x86_64-images.md)
-
 # x86_64 images
 
 Kyanite also ships ready-to-use disk images for x86_64: PCs, virtual machines and Windows/Linux hosts. They are published in the GitHub release [x86_64 images for PC/Windows/Linux, QEMU, VirtualBox, VMware, etc.](https://github.com/StringManolo/Kyanite/releases/tag/qemuTest).
 
-Looking for the root filesystem archives (`aarch64` / `x86_64`) instead? See the [installation guide](installation.md).
+For step-by-step instructions (VirtualBox, VMware, QEMU, Rufus and USB sticks), see the [installation guide](installation.md). Looking for the root filesystem archives (`aarch64` / `x86_64`) instead? See the [installation guide](installation.md).
 
 > ⚠️ The installer included in the live ISO has **not been tested on real hardware yet** and can permanently delete all your files. If you do not know what you are doing, do not run it. Back up your data first.
 
@@ -19,46 +17,15 @@ Looking for the root filesystem archives (`aarch64` / `x86_64`) instead? See the
 | Write a USB stick for a real PC, firmware **included** | `kyanite-x86_64-hw.img.zip` |
 | Get the typical Linux live CD (with an installer script) | `kyanite-x86_64-hw-live.iso` |
 
-## QEMU (BIOS)
+## What you will see
+
+This is how Kyanite starts in QEMU: the GRUB menu, then the system.
 
 <img width="720" height="391" alt="Kyanite GRUB menu in QEMU" src="https://github.com/user-attachments/assets/032289ef-c50f-4e2f-b491-79b66ea7fecb" />
 
-This is just my setup; you can use any other.
-
-1. Install Termux and Termux:X11.
-2. Run in Termux:
-
-```bash
-termux-x11 :0 -listen tcp -ac
-```
-
-3. Run in [DebianLiveCD4Android](https://github.com/StringManolo/DebianLiveCD4Android) with an Alpine rootfs (this assumes `qemu-system-x86_64` is already installed):
-
-```bash
-apk add qemu-ui-gtk
-unset SDL_VIDEODRIVER
-export DISPLAY=127.0.0.1:0
-qemu-system-x86_64 -m 1G -drive file=kyanite-x86_64.img,format=raw -display gtk -vga std
-```
-
-4. Open the Termux:X11 app and you will see the BIOS.
-
 <img width="720" height="395" alt="Kyanite booting in QEMU" src="https://github.com/user-attachments/assets/5f5197f0-e16f-4dba-b45b-0e99b841d2ba" />
 
-## VirtualBox
-
-Use `kyanite-x86_64.vdi`.
-
-## VMware
-
-Use `kyanite-x86_64.vmdk`.
-
-## Rufus (USB stick)
-
-Extract the zip first and write the `.img` in **DD Image** mode. The image lives on its own virtual drive.
-
-- `kyanite-x86_64.img.zip`: **no** firmware included.
-- `kyanite-x86_64-hw.img.zip`: firmware **included**.
+## Why are the Rufus images in a zip?
 
 The images are distributed inside a zip because they are about 90% smaller compressed: they contain a virtual disk with more than 500 MB of zeros as extra storage. Once extracted they can take up to 1.6 GB.
 
