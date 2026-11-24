@@ -33,7 +33,7 @@ jobs:
   build:
     name: build (${{ matrix.variant }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -77,6 +77,7 @@ jobs:
             alpine:3 sh /image/alpine-kernel.sh
           docker run --name kyinst alpine:3 sh -eu -c '
             apk add --no-cache busybox-static e2fsprogs dosfstools sgdisk grub grub-bios grub-efi efibootmgr >/dev/null
+            apk add --no-cache sfdisk cfdisk >/dev/null 2>&1 || apk add --no-cache util-linux-misc >/dev/null
             mkdir -p /src/rootfs /src/medium /target /mnt/esp /lib/modules /tmp /run /usr/local/bin /usr/local/sbin /usr/local/share/kyanite
           '
           sudo mkdir -p stage/installer
@@ -199,13 +200,18 @@ jobs:
 
           INSTALLING (from the live system): run  /usr/local/sbin/kyanite-install
             1) Erase the whole disk and install Kyanite (BIOS and UEFI).
-            2) Install alongside the existing system (UEFI only, GPT disk, an EFI System Partition and 2 GiB of free space):
-               keeps Windows and your data. Shrink the Windows partition from Windows first (Disk Management);
-               if the disk is encrypted with BitLocker, suspend it first. Kyanite gets its own partition, reuses the
-               existing EFI System Partition, and the GRUB menu gets a "Windows" entry. You can also choose Windows or
-               Kyanite from the firmware boot menu.
+            2) Install alongside the existing system: keeps Windows and your data. Needs 2 GiB of free space.
+               Shrink the Windows partition from Windows first (Disk Management); if the disk is encrypted with
+               BitLocker, suspend it first. Kyanite gets its own partition and the GRUB menu gets a "Windows" entry.
+                 - UEFI + GPT disk: reuses the existing EFI System Partition. Boot the live system in UEFI mode.
+                 - BIOS + MBR disk: needs a free primary partition slot and 1 MiB free before the first partition;
+                   GRUB goes to the MBR and chainloads Windows. Boot the live system in BIOS mode.
+               You can also choose Windows or Kyanite from the firmware boot menu.
+            3) Manual: partition the disks yourself with cfdisk, then choose the system partition (formatted as ext4)
+               and, on UEFI, the EFI System Partition (reused). On BIOS with a GPT disk create a 1 MiB "BIOS boot"
+               partition first. Swap and extra mount points are not offered yet (the init does not read /etc/fstab).
 
-          NOT INCLUDED: Secure Boot support, automatic network configuration (DHCP), dual boot with BIOS/MBR Windows.
+          NOT INCLUDED: Secure Boot support, automatic network configuration (DHCP).
           EOF
           else
             cat > README.txt <<'EOF'
@@ -215,6 +221,7 @@ jobs:
           kyanite-x86_64.vmdk  VMware disk.
           kyanite-x86_64.img   Raw disk image (QEMU, or USB with Rufus in "DD Image" mode).
           kyanite-x86_64-live.iso   Live system with installer; mount it as a CD. In VirtualBox enable EFI only if you want UEFI.
+                                    Inside it run /usr/local/sbin/kyanite-install (automatic, alongside, or manual partitioning).
 
           QEMU: use  -cpu max  (the default CPU model lacks instructions that some programs need, e.g. vim).
           For real PCs use the "hardware" image set (it includes firmware).
@@ -241,6 +248,10 @@ jobs:
           if [ -e /kyanite-serial ]; then set extra="console=ttyS0,115200"; fi
           if [ -e /kyanite-autoinstall ]; then set extra="$extra kyanite.autoinstall=auto"; fi
           if [ -e /kyanite-alongside ]; then set extra="$extra kyanite.mode=alongside"; fi
+          if [ -e /kyanite-manual.cfg ]; then
+            source /kyanite-manual.cfg
+            set extra="$extra kyanite.mode=manual kyanite.root=$kyroot kyanite.esp=$kyesp"
+          fi
 
           function kyboot {
             linux /boot/vmlinuz console=tty0 $extra kyanite.keymap=$1
@@ -275,11 +286,12 @@ jobs:
           }
           EOF
 
-          make_iso() {   # make_iso OUTPUT [marker files...]
+          make_iso() {   # make_iso OUTPUT [marker files...]   (MANUAL_CFG env -> /kyanite-manual.cfg)
             local out=$1; shift
             local tmp; tmp=$(mktemp -d -p .)
-            cp -a isodir/. "$tmp"/
+            cp -al isodir/. "$tmp"/
             for m in "$@"; do touch "$tmp/$m"; done
+            if [ -n "${MANUAL_CFG:-}" ]; then printf '%s\n' "$MANUAL_CFG" > "$tmp/kyanite-manual.cfg"; fi
             grub-mkrescue -o "$out" "$tmp"
             rm -rf "$tmp"
           }
@@ -287,6 +299,8 @@ jobs:
           make_iso test-live.iso kyanite-serial
           make_iso test-install.iso kyanite-serial kyanite-autoinstall
           make_iso test-install-alongside.iso kyanite-serial kyanite-autoinstall kyanite-alongside
+          MANUAL_CFG=$'set kyroot=/dev/sda2\nset kyesp=/dev/sda1' make_iso test-manual-uefi.iso kyanite-serial kyanite-autoinstall
+          MANUAL_CFG=$'set kyroot=/dev/sda1\nset kyesp=' make_iso test-manual-bios.iso kyanite-serial kyanite-autoinstall
           ls -lh ./*.iso
 
       - name: Tests - disk image (BIOS/UEFI x SATA/USB)
@@ -398,6 +412,70 @@ jobs:
           else
             record_skip alongside-verify "the alongside installation failed"
             record_skip installed-alongside-uefi "the alongside installation failed"
+          fi
+          exit 0
+
+      - name: Tests - installer, alongside a (fake) BIOS/MBR Windows
+        if: ${{ !cancelled() && steps.iso.outcome == 'success' }}
+        run: |
+          set +e
+          set -uo pipefail
+          source image/lib-test.sh
+          enable_kvm
+          make_fake_windows_mbr_disk target-winbios.img
+          if EXPECT_RAW=1 LIMIT="$INSTALL_LIMIT" run_vm "install-alongside-bios" "KYANITE-INSTALL-DONE" 1 \
+              -drive if=none,id=cd0,file=test-install-alongside.iso,media=cdrom,readonly=on \
+              -device ide-cd,drive=cd0,bus=ide.1,bootindex=0 \
+              -drive if=none,id=d0,file=target-winbios.img,format=raw -device ide-hd,drive=d0,bus=ide.0; then
+            verify_alongside_bios target-winbios.img
+            set_serial_entry target-winbios.img 3 boot/grub/grubenv
+            run_vm "installed-alongside-bios" "$EXPECT" 0 \
+              -drive if=none,id=d0,file=target-winbios.img,format=raw,snapshot=on \
+              -device ide-hd,drive=d0,bus=ide.0,bootindex=0 || true
+          else
+            record_skip alongside-bios-verify "the BIOS alongside installation failed"
+            record_skip installed-alongside-bios "the BIOS alongside installation failed"
+          fi
+          exit 0
+
+      - name: Tests - installer, manual mode (UEFI with an existing ESP, and BIOS/MBR)
+        if: ${{ !cancelled() && steps.iso.outcome == 'success' }}
+        run: |
+          set +e
+          set -uo pipefail
+          source image/lib-test.sh
+          enable_kvm
+
+          # UEFI: the root partition and the (existing) EFI System Partition are chosen explicitly
+          make_manual_uefi_disk target-manual-uefi.img
+          if EXPECT_RAW=1 LIMIT="$INSTALL_LIMIT" run_vm "install-manual-uefi" "KYANITE-INSTALL-DONE" 1 $(fw_args uefi) \
+              -drive if=none,id=cd0,file=test-manual-uefi.iso,media=cdrom,readonly=on \
+              -device ide-cd,drive=cd0,bus=ide.1,bootindex=0 \
+              -drive if=none,id=d0,file=target-manual-uefi.img,format=raw -device ide-hd,drive=d0,bus=ide.0; then
+            verify_manual_uefi target-manual-uefi.img
+            set_serial_entry target-manual-uefi.img 2 boot/grub/grubenv
+            run_vm "installed-manual-uefi" "$EXPECT" 0 $(fw_args uefi) \
+              -drive if=none,id=d0,file=target-manual-uefi.img,format=raw,snapshot=on \
+              -device ide-hd,drive=d0,bus=ide.0,bootindex=0 || true
+          else
+            record_skip manual-uefi-verify "the manual UEFI installation failed"
+            record_skip installed-manual-uefi "the manual UEFI installation failed"
+          fi
+
+          # BIOS + MBR: GRUB goes to the MBR of the disk that holds the chosen root partition
+          make_manual_bios_disk target-manual-bios.img
+          if EXPECT_RAW=1 LIMIT="$INSTALL_LIMIT" run_vm "install-manual-bios" "KYANITE-INSTALL-DONE" 1 \
+              -drive if=none,id=cd0,file=test-manual-bios.iso,media=cdrom,readonly=on \
+              -device ide-cd,drive=cd0,bus=ide.1,bootindex=0 \
+              -drive if=none,id=d0,file=target-manual-bios.img,format=raw -device ide-hd,drive=d0,bus=ide.0; then
+            verify_manual_bios target-manual-bios.img
+            set_serial_entry target-manual-bios.img 1 boot/grub/grubenv
+            run_vm "installed-manual-bios" "$EXPECT" 0 \
+              -drive if=none,id=d0,file=target-manual-bios.img,format=raw,snapshot=on \
+              -device ide-hd,drive=d0,bus=ide.0,bootindex=0 || true
+          else
+            record_skip manual-bios-verify "the manual BIOS installation failed"
+            record_skip installed-manual-bios "the manual BIOS installation failed"
           fi
           exit 0
 

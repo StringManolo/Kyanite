@@ -280,3 +280,174 @@ verify_alongside() {
   fi
   [ "$ok" = 1 ]
 }
+
+# ---------------------------------------------------------------------------------------------------
+# Installer test fixtures. Each make_* builds a disk image in the state a user would start from, and
+# each verify_* checks the result after an unattended install and records one line in results.tsv.
+# ---------------------------------------------------------------------------------------------------
+
+# Prints the partition entries of an image without the device name (so they can be compared)
+mbr_entries_of() { sfdisk -d "$1" 2>/dev/null | grep ' : start=' | sed 's/^[^ ]* //'; }
+
+sha_part()  { sudo dd if="$1" bs=1M status=none | sha256sum | cut -d' ' -f1; }
+
+# make_fake_windows_mbr_disk IMAGE
+# 8 GiB MBR disk that imitates a legacy-BIOS Windows PC: 100 MiB "System Reserved" NTFS partition (active,
+# with a fake /bootmgr) and a 1 GiB NTFS partition; the rest is free.
+make_fake_windows_mbr_disk() {
+  local img=$1 loop
+  rm -f "$img" "$img".sha.* "$img".pt0
+  truncate -s 8G "$img"
+  sfdisk -q "$img" <<'EOF'
+label: dos
+unit: sectors
+
+start=2048, size=204800, type=7, bootable
+start=206848, size=2097152, type=7
+EOF
+  loop=$(sudo losetup --find --show --partscan "$img")
+  sudo udevadm settle || true
+  wait_node "${loop}p2"
+  sudo mkfs.ntfs -Q -L "System Reserved" "${loop}p1" >/dev/null 2>&1
+  sudo mkfs.ntfs -Q -L Windows "${loop}p2" >/dev/null 2>&1
+  mkdir -p "$PWD/mnt/ntfs"
+  sudo mount -t ntfs3 "${loop}p1" "$PWD/mnt/ntfs" 2>/dev/null || sudo mount -t ntfs-3g "${loop}p1" "$PWD/mnt/ntfs"
+  head -c 65536 /dev/urandom | sudo tee "$PWD/mnt/ntfs/bootmgr" >/dev/null
+  sudo umount "$PWD/mnt/ntfs"
+  sudo mount -t ntfs3 "${loop}p2" "$PWD/mnt/ntfs" 2>/dev/null || sudo mount -t ntfs-3g "${loop}p2" "$PWD/mnt/ntfs"
+  echo "fake windows data" | sudo tee "$PWD/mnt/ntfs/pagefile.sys" >/dev/null
+  sudo umount "$PWD/mnt/ntfs"
+  sha_part "${loop}p1" > "$img.sha.p1"
+  sha_part "${loop}p2" > "$img.sha.p2"
+  mbr_entries_of "$img" > "$img.pt0"
+  sudo losetup -d "$loop"
+}
+
+# verify_alongside_bios IMAGE  (records "alongside-bios-verify")
+verify_alongside_bios() {
+  local img=$1 loop ok=1 details="" cur
+  loop=$(sudo losetup --find --show --partscan "$img")
+  sudo udevadm settle || true
+  wait_node "${loop}p3"
+  mkdir -p "$PWD/mnt/root"
+
+  if [ "$(sha_part "${loop}p1")" = "$(cat "$img.sha.p1")" ]; then details="$details system-reserved-intact"; else details="$details SYSTEM-RESERVED-CHANGED"; ok=0; fi
+  if [ "$(sha_part "${loop}p2")" = "$(cat "$img.sha.p2")" ]; then details="$details windows-intact"; else details="$details WINDOWS-CHANGED"; ok=0; fi
+  cur=$(mbr_entries_of "$img" | head -n 2)
+  if [ "$cur" = "$(head -n 2 "$img.pt0")" ]; then details="$details entries-unchanged"; else details="$details ENTRIES-CHANGED"; ok=0; fi
+  if mbr_entries_of "$img" | grep 'type=83' >/dev/null; then details="$details linux-partition"; else details="$details NO-LINUX-PARTITION"; ok=0; fi
+  if sudo dd if="$img" bs=512 count=1 status=none | grep -a GRUB >/dev/null; then details="$details grub-in-mbr"; else details="$details NO-GRUB-IN-MBR"; ok=0; fi
+
+  sudo mount -o ro "${loop}p3" "$PWD/mnt/root"
+  if sudo test -f "$PWD/mnt/root/boot/vmlinuz" && sudo test -f "$PWD/mnt/root/boot/initramfs"; then
+    details="$details kernel-in-root"; else details="$details NO-KERNEL-IN-ROOT"; ok=0
+  fi
+  if sudo grep 'menuentry "Windows"' "$PWD/mnt/root/boot/grub/grub.cfg" >/dev/null \
+     && sudo grep '/bootmgr' "$PWD/mnt/root/boot/grub/grub.cfg" >/dev/null; then
+    details="$details windows-entry"; else details="$details NO-WINDOWS-ENTRY"; ok=0
+  fi
+  sudo umount "$PWD/mnt/root"
+  sudo losetup -d "$loop"
+
+  if [ "$ok" = 1 ]; then
+    echo "OK   alongside-bios-verify ($details)"
+    record alongside-bios-verify ok "Windows (BIOS/MBR) data untouched, Kyanite installed alongside" "$details"
+  else
+    echo "FAIL alongside-bios-verify ($details)"
+    record alongside-bios-verify fail "BIOS alongside install checks failed" "$details"
+  fi
+  [ "$ok" = 1 ]
+}
+
+# make_manual_uefi_disk IMAGE
+# GPT disk with an existing EFI System Partition (holding a marker file that must survive) and an empty
+# 3 GiB partition for the system. Used with: --mode manual --root /dev/sda2 --esp /dev/sda1
+make_manual_uefi_disk() {
+  local img=$1 loop
+  rm -f "$img" "$img".sha.*
+  truncate -s 8G "$img"
+  sgdisk -o "$img" >/dev/null
+  sgdisk -n 1:2048:+100M -t 1:ef00 -c 1:"EFI system partition" "$img" >/dev/null
+  sgdisk -n 2:0:+3G -t 2:8300 -c 2:"root" "$img" >/dev/null
+  loop=$(sudo losetup --find --show --partscan "$img")
+  sudo udevadm settle || true
+  wait_node "${loop}p2"
+  sudo mkfs.vfat -F 32 -n SYSTEM "${loop}p1" >/dev/null
+  mkdir -p "$PWD/mnt/esp"
+  sudo mount "${loop}p1" "$PWD/mnt/esp"
+  sudo mkdir -p "$PWD/mnt/esp/EFI/Marker"
+  echo "keep me" | sudo tee "$PWD/mnt/esp/EFI/Marker/keep.txt" >/dev/null
+  sudo sha256sum "$PWD/mnt/esp/EFI/Marker/keep.txt" | cut -d' ' -f1 > "$img.sha.marker"
+  sudo umount "$PWD/mnt/esp"
+  sudo losetup -d "$loop"
+}
+
+# verify_manual_uefi IMAGE  (records "manual-uefi-verify")
+verify_manual_uefi() {
+  local img=$1 loop ok=1 details="" new
+  loop=$(sudo losetup --find --show --partscan "$img")
+  sudo udevadm settle || true
+  wait_node "${loop}p2"
+  mkdir -p "$PWD/mnt/esp" "$PWD/mnt/root"
+
+  sudo mount -o ro "${loop}p1" "$PWD/mnt/esp"
+  new=$(sudo sha256sum "$PWD/mnt/esp/EFI/Marker/keep.txt" | cut -d' ' -f1)
+  if [ "$new" = "$(cat "$img.sha.marker")" ]; then details="$details esp-marker-intact"; else details="$details ESP-MARKER-CHANGED"; ok=0; fi
+  if sudo test -f "$PWD/mnt/esp/EFI/Kyanite/grubx64.efi"; then details="$details esp-has-kyanite"; else details="$details NO-EFI/Kyanite"; ok=0; fi
+  sudo umount "$PWD/mnt/esp"
+
+  sudo mount -o ro "${loop}p2" "$PWD/mnt/root"
+  if sudo test -f "$PWD/mnt/root/boot/vmlinuz" && sudo test -f "$PWD/mnt/root/boot/grub/grub.cfg"; then
+    details="$details kernel-and-grubcfg-in-root"; else details="$details NO-KERNEL-IN-ROOT"; ok=0
+  fi
+  sudo umount "$PWD/mnt/root"
+  sudo losetup -d "$loop"
+
+  if [ "$ok" = 1 ]; then
+    echo "OK   manual-uefi-verify ($details)"
+    record manual-uefi-verify ok "manual install: chosen partitions used, existing ESP content kept" "$details"
+  else
+    echo "FAIL manual-uefi-verify ($details)"
+    record manual-uefi-verify fail "manual UEFI install checks failed" "$details"
+  fi
+  [ "$ok" = 1 ]
+}
+
+# make_manual_bios_disk IMAGE
+# MBR disk with a single empty 3 GiB Linux partition (and free space). Used with: --mode manual --root /dev/sda1
+make_manual_bios_disk() {
+  local img=$1
+  rm -f "$img" "$img".sha.*
+  truncate -s 8G "$img"
+  sfdisk -q "$img" <<'EOF'
+label: dos
+unit: sectors
+
+start=2048, size=6291456, type=83
+EOF
+}
+
+# verify_manual_bios IMAGE  (records "manual-bios-verify")
+verify_manual_bios() {
+  local img=$1 loop ok=1 details=""
+  loop=$(sudo losetup --find --show --partscan "$img")
+  sudo udevadm settle || true
+  wait_node "${loop}p1"
+  mkdir -p "$PWD/mnt/root"
+  if sudo dd if="$img" bs=512 count=1 status=none | grep -a GRUB >/dev/null; then details="$details grub-in-mbr"; else details="$details NO-GRUB-IN-MBR"; ok=0; fi
+  sudo mount -o ro "${loop}p1" "$PWD/mnt/root"
+  if sudo test -f "$PWD/mnt/root/boot/vmlinuz" && sudo test -f "$PWD/mnt/root/boot/grub/grub.cfg"; then
+    details="$details kernel-and-grubcfg-in-root"; else details="$details NO-KERNEL-IN-ROOT"; ok=0
+  fi
+  sudo umount "$PWD/mnt/root"
+  sudo losetup -d "$loop"
+
+  if [ "$ok" = 1 ]; then
+    echo "OK   manual-bios-verify ($details)"
+    record manual-bios-verify ok "manual install on a BIOS/MBR disk: GRUB in the MBR, system on the chosen partition" "$details"
+  else
+    echo "FAIL manual-bios-verify ($details)"
+    record manual-bios-verify fail "manual BIOS install checks failed" "$details"
+  fi
+  [ "$ok" = 1 ]
+}

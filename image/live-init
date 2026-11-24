@@ -4,7 +4,9 @@
 # 2) Mounts the rootfs + a RAM overlay and does switch_root into Kyanite
 # Kernel command line:
 #   kyanite.autoinstall=auto|/dev/xxx   install without asking, then power off (used by CI)
-#   kyanite.mode=wipe|alongside         install mode for the autoinstall (default wipe)
+#   kyanite.mode=wipe|alongside|manual  install mode for the autoinstall (default wipe)
+#   kyanite.root=/dev/xxx               manual mode: partition for the system
+#   kyanite.esp=/dev/xxx                manual mode (UEFI): EFI System Partition
 
 export PATH=/sbin:/bin:/usr/sbin:/usr/bin
 /bin/busybox --install -s /bin 2>/dev/null
@@ -23,10 +25,14 @@ emergency() {
 
 AUTO=""
 MODE=""
+ROOT=""
+ESP=""
 for p in $(cat /proc/cmdline); do
   case "$p" in
     kyanite.autoinstall=*) AUTO="${p#kyanite.autoinstall=}" ;;
     kyanite.mode=*)        MODE="${p#kyanite.mode=}" ;;
+    kyanite.root=*)        ROOT="${p#kyanite.root=}" ;;
+    kyanite.esp=*)         ESP="${p#kyanite.esp=}" ;;
   esac
 done
 
@@ -80,13 +86,12 @@ mount -t squashfs -o loop,ro /mnt/media/kyanite/installer.squashfs /mnt/installe
 # --- unattended install (CI) -------------------------------------------------------------------
 if [ -n "$AUTO" ]; then
   log "autoinstall -> $AUTO (mode: ${MODE:-wipe})"
-  if [ -n "$MODE" ]; then
-    K_INSTALLER=/mnt/installer K_ROOTFS=/mnt/rootfs K_MEDIUM=/mnt/media \
-      sh /mnt/installer/usr/local/sbin/kyanite-install-wrapper --auto "$AUTO" --mode "$MODE"
-  else
-    K_INSTALLER=/mnt/installer K_ROOTFS=/mnt/rootfs K_MEDIUM=/mnt/media \
-      sh /mnt/installer/usr/local/sbin/kyanite-install-wrapper --auto "$AUTO"
-  fi
+  set -- --auto "$AUTO"
+  [ -n "$MODE" ] && set -- "$@" --mode "$MODE"
+  [ -n "$ROOT" ] && set -- "$@" --root "$ROOT"
+  [ -n "$ESP" ]  && set -- "$@" --esp "$ESP"
+  K_INSTALLER=/mnt/installer K_ROOTFS=/mnt/rootfs K_MEDIUM=/mnt/media \
+    sh /mnt/installer/usr/local/sbin/kyanite-install-wrapper "$@"
   log "installer exited with code $?"
   sync
   poweroff -f
