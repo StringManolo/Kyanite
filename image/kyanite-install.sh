@@ -72,7 +72,6 @@ parent_of() {
 }
 
 gpt_info() { sgdisk -p "$1" 2>/dev/null || true; }
-is_gpt()   { case "$(gpt_info "$1")" in *"GPT: present"*) return 0 ;; esac; return 1; }
 esp_number() {
   printf '%s\n' "$(gpt_info "$1")" | awk '$1 ~ /^[0-9]+$/ && toupper($6) == "EF00" && !f {print $1; f=1}'
 }
@@ -92,6 +91,9 @@ free_mib() {
 
 mbr_info()  { sfdisk -d "$1" 2>/dev/null || true; }
 is_msdos()  { case "$(mbr_info "$1")" in *"label: dos"*) return 0 ;; esac; return 1; }
+# GPT is detected through sfdisk ("label: gpt"). `sgdisk -p` does NOT print a "GPT: present" line: that
+# text belongs to gdisk's interactive banner, so matching it never succeeds.
+is_gpt()    { case "$(mbr_info "$1")" in *"label: gpt"*) return 0 ;; esac; return 1; }
 mbr_entries() { printf '%s\n' "$(mbr_info "$1")" | awk '/^\/dev\// {print $1}'; }
 mbr_first_start() {
   printf '%s\n' "$(mbr_info "$1")" | sed -n 's/.*start= *\([0-9][0-9]*\),.*/\1/p' | sort -n | sed -n 1p
