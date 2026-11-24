@@ -77,24 +77,55 @@ There are two ways, both without root.
 **With proot-distro** (fast: it runs Kyanite directly on your phone). Run this once to register Kyanite as a custom distribution (it picks the archive that matches your phone):
 
 ```sh
-pkg install proot-distro curl
-PD=$(dpkg --print-architecture)                 # aarch64, arm or x86_64
-case "$PD" in arm) A=armv7 ;; *) A=$PD ;; esac  # name used by the Kyanite archives
-URL=https://github.com/StringManolo/Kyanite/releases/latest/download/kyanite-rootfs-$A.tar.xz
-SHA=$(curl -fsSL "$URL.sha256" | cut -d' ' -f1)
-cat > "$PREFIX/etc/proot-distro/kyanite.sh" <<EOF
-DISTRO_NAME="Kyanite"
-TARBALL_STRIP_OPT=0
-TARBALL_URL['$PD']="$URL"
-TARBALL_SHA256['$PD']="$SHA"
-EOF
-proot-distro install kyanite
+NAME=kyanite
+BASE=https://github.com/StringManolo/Kyanite/releases/latest/download
+: "${PREFIX:?run this inside Termux}"
+
+# Archive name for this phone (dpkg uses Termux's own architecture names: aarch64, arm, x86_64)
+case "$(dpkg --print-architecture)" in
+  aarch64) ARCH=aarch64 ;;
+  arm)     ARCH=armv7 ;;
+  x86_64)  ARCH=x86_64 ;;
+  *) echo "Unsupported architecture: $(dpkg --print-architecture)" >&2; exit 1 ;;
+esac
+FILE="kyanite-rootfs-$ARCH.tar.xz"
+
+pkg install -y proot-distro curl
+
+if [ -d "$PREFIX/var/lib/proot-distro/containers/$NAME" ]; then
+  echo "Kyanite is already installed (remove it first with: proot-distro remove $NAME)."
+else
+  TMP=$(mktemp -d)
+  trap 'rm -rf "$TMP"' EXIT
+  echo "Downloading $FILE ..."
+  curl -fL --progress-bar -o "$TMP/$FILE" "$BASE/$FILE"
+  curl -fsSL -o "$TMP/$FILE.sha256" "$BASE/$FILE.sha256"
+  echo "Checking the SHA256 checksum ..."
+  (cd "$TMP" && sha256sum -c "$FILE.sha256")
+  proot-distro install "$TMP/$FILE" --name "$NAME"
+fi
+
+# `kyanite`          -> opens a shell
+# `kyanite COMMAND`  -> runs COMMAND and exits
+cat > "$PREFIX/bin/kyanite" <<LAUNCHER
+#!$PREFIX/bin/sh
+if [ "\$#" -eq 0 ]; then
+  exec proot-distro login $NAME
+else
+  exec proot-distro login $NAME -- "\$@"
+fi
+LAUNCHER
+chmod 755 "$PREFIX/bin/kyanite"
+
+echo
+echo "Done. Type  kyanite  to start it."
+echo "To remove it:  proot-distro remove $NAME && rm \"$PREFIX/bin/kyanite\""
 ```
 
 Then, whenever you want to use it:
 
 ```sh
-proot-distro login kyanite -- /bin/sh -l
+kyanite
 ```
 
 **With QEMU** (slow: it emulates a whole PC, but lets you try the x86_64 images):
