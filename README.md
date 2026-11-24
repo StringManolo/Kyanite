@@ -76,6 +76,7 @@ Want to know how the pieces fit together? Read the [architecture guide](docs/arc
 | [Glossary](docs/glossary.md) | Technical words explained in plain language |
 | [Android guide](docs/android.md) | Using Kyanite on your phone |
 | [Installation](docs/installation.md) | Downloading, verifying and starting Kyanite |
+| [x86_64 images](docs/x86_64-images.md) | Disk images for PCs and virtual machines (QEMU, VirtualBox, VMware) |
 | [Usage](docs/usage.md) | Shell environment and customization |
 | [Package manager (`kpkg`)](docs/kpkg.md) | Commands, options and package management |
 | [Package hooks](docs/package-hooks.md) | How Kyanite configures packages |

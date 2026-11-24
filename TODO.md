@@ -6,6 +6,7 @@
 - ~~Also fix tty on qemu~~
 - Upgrade don't apply cleanly to init component (add option to 'force' to don't generate '-new' files for core components when specified on the update patch)
 - Test if base apk updates work for arm32 (or it downloads the arm64 rootfs) 
+- Sometimes the terminal insters a line break randomly when pressing a key. (This is a problem either with brush, or with the init system. Should find how to reproduce the bug and swap brush for bash to check where the problem is at)
 
 ### Security
 - Check for env replacement for a Rust version 
@@ -38,6 +39,7 @@
 - translate SECURITY.md
 - Add support for arm32
 - Full KyaniteAndroid translation to the 4 supported languages)
+- Basic GUI for PC users of the Hardware image
 - Test all typical software (to check for missing hooks) Tested:
   - npm
   - python

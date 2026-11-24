@@ -76,6 +76,7 @@ La [guía de uso](docs/es/usage.md) y la [guía de kpkg](docs/es/kpkg.md) tienen
 | [Glosario](docs/es/glossary.md) | Palabras técnicas explicadas en lenguaje sencillo |
 | [Guía de Android](docs/es/android.md) | Usar Kyanite en tu móvil |
 | [Instalación](docs/es/installation.md) | Descargar, verificar e iniciar Kyanite |
+| [Imágenes x86_64](docs/es/x86_64-images.md) | Imágenes de disco para PC y máquinas virtuales (QEMU, VirtualBox, VMware) |
 | [Uso](docs/es/usage.md) | Entorno de shell y personalización |
 | [Gestor de paquetes (`kpkg`)](docs/es/kpkg.md) | Comandos, opciones y gestión de paquetes |
 | [Hooks de paquetes](docs/es/package-hooks.md) | Cómo configura Kyanite los paquetes |

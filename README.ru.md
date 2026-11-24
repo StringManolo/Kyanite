@@ -76,6 +76,7 @@ kpkg add curl
 | [Глоссарий](docs/ru/glossary.md) | Технические слова простым языком |
 | [Руководство по Android](docs/ru/android.md) | Использование Kyanite на телефоне |
 | [Установка](docs/ru/installation.md) | Загрузка, проверка и запуск Kyanite |
+| [Образы x86_64](docs/ru/x86_64-images.md) | Образы дисков для ПК и виртуальных машин (QEMU, VirtualBox, VMware) |
 | [Использование](docs/ru/usage.md) | Окружение оболочки и настройка |
 | [Менеджер пакетов (`kpkg`)](docs/ru/kpkg.md) | Команды, параметры и управление пакетами |
 | [Хуки пакетов](docs/ru/package-hooks.md) | Как Kyanite настраивает пакеты |

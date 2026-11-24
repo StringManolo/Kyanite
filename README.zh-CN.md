@@ -76,6 +76,7 @@ kpkg add curl
 | [术语表](docs/zh-CN/glossary.md) | 用通俗语言解释技术词汇 |
 | [Android 指南](docs/zh-CN/android.md) | 在手机上使用 Kyanite |
 | [安装](docs/zh-CN/installation.md) | 下载、验证和启动 Kyanite |
+| [x86_64 镜像](docs/zh-CN/x86_64-images.md) | 适用于 PC 和虚拟机（QEMU、VirtualBox、VMware）的磁盘镜像 |
 | [使用](docs/zh-CN/usage.md) | Shell 环境与自定义 |
 | [包管理器 (`kpkg`)](docs/zh-CN/kpkg.md) | 命令、选项和包管理 |
 | [包钩子](docs/zh-CN/package-hooks.md) | Kyanite 如何配置软件包 |
