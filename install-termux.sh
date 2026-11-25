@@ -46,3 +46,6 @@ chmod 755 "$PREFIX/bin/kyanite"
 echo
 echo "Done. Type  kyanite  to start it."
 echo "To remove it:  proot-distro remove $NAME && rm \"$PREFIX/bin/kyanite\""
+
+echo "System is ready. Run the command: kyanite"
+echo "To exit Kyanite, type exit or q"
