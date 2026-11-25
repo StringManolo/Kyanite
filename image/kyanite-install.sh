@@ -55,7 +55,13 @@ UEFI=0
 
 modprobe -ab vfat ext4 nls_cp437 nls_iso8859_1 2>/dev/null || true
 if [ "$UEFI" = 1 ]; then
-  mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null || true
+  # efibootmgr needs efivarfs. It is usually a module, so it has to be loaded first, and a failure must be visible.
+  modprobe efivarfs 2>/dev/null || true
+  if ! grep ' efivarfs ' /proc/mounts >/dev/null 2>&1; then
+    if ! mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/tmp/efivarfs.err; then
+      say "warning: cannot mount efivarfs ($(tr '\n' ' ' < /tmp/efivarfs.err)): the UEFI boot entry cannot be registered"
+    fi
+  fi
 fi
 
 # ---- helpers: partition tables --------------------------------------------------------------------

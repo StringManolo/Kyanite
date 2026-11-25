@@ -43,7 +43,7 @@ coldplug() {
 log "loading drivers"
 for m in loop squashfs overlay isofs cdrom sr_mod sd_mod usb_storage uas ahci libahci \
          ata_piix ata_generic nvme virtio_blk virtio_pci virtio_scsi mmc_block ext4 vfat \
-         nls_cp437 nls_iso8859_1 nls_utf8; do
+         nls_cp437 nls_iso8859_1 nls_utf8 efivarfs; do
   modprobe "$m" 2>/dev/null
 done
 coldplug

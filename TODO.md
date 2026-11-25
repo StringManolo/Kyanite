@@ -1,7 +1,7 @@
 # TODO
 
 ### Investigate
-- Check why x86 build is double the size of arm
+- ~~Check why x86 build is double the size of arm~~
 - ~~Qemu error: tcsetpgrp(0, 166) FALLO: Not a tty (os error 25)~~
 - ~~Also fix tty on qemu~~
 - Upgrade don't apply cleanly to init component (add option to 'force' to don't generate '-new' files for core components when specified on the update patch)
@@ -10,7 +10,7 @@
 
 ### Security
 - Check for env replacement for a Rust version 
-- Check all files 1 by 1.
+- Improve all files 1 by 1.
 - Make sure last security patches of kpkg overide stable
 - ~~Add opengpg check of signatures pre https~~
 - ~~PRIORITY Add autopdate from nightly realeases created from github actions (only when a core component updates) (check how to automatize to rebuild on security related updates of any of the sofware) (download the tarball, readchangelogs or missmatched sha, and replace)~~
@@ -25,7 +25,7 @@
 - ~~Ship vi~~ (check if rust ports are available) by default
 - Check if installing other shells messes with init and/or brush
 - ~~Ship as own APK for Android with DebianLiveCD4Android as base APK.~~
-- Add proot-distro install script in the repo
+- ~~Add proot-distro install script in the repo~
 - ~~Add screenshot (generate from logo.txt,~~ try chafta)
 - Missing basics: find, grep, which
 - Recycle bin

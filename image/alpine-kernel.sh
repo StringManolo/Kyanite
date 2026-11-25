@@ -13,6 +13,7 @@ kernel/fs/squashfs/*
 kernel/fs/overlayfs/*
 kernel/fs/isofs/*
 kernel/fs/fat/*
+kernel/fs/efivarfs/*
 kernel/fs/nls/nls_cp437.*
 kernel/fs/nls/nls_iso8859-1.*
 kernel/fs/nls/nls_utf8.*
@@ -70,10 +71,8 @@ if [ "${VARIANT:-vm}" = hardware ]; then
 fi
 
 # Versions of what went into this build (shown in the job summary)
-{
-  apk info -v "linux-$FLAVOR" mkinitfs busybox-static kbd-bkeymaps 2>/dev/null
-  apk list -I 2>/dev/null | grep -E 'firmware|sof-' || true
-} > /out/versions.txt
+apk list -I 2>/dev/null | awk '{print $1}' \
+  | grep -E "^(linux-$FLAVOR|mkinitfs|busybox-static|kbd-bkeymaps|linux-firmware|sof-firmware)" > /out/versions.txt || true
 
 chmod -R a+rX /out
 ls -lh /out
