@@ -7,6 +7,7 @@
 - Upgrade don't apply cleanly to init component (add option to 'force' to don't generate '-new' files for core components when specified on the update patch)
 - Test if base apk updates work for arm32 (or it downloads the arm64 rootfs) 
 - Sometimes the terminal insters a line break randomly when pressing a key. (This is a problem either with brush, or with the init system. Should find how to reproduce the bug and swap brush for bash to check where the problem is at)
+- kpkg error when manually cancelling a software install: /var/lib/kpkg/lock
 
 ### Security
 - Check for env replacement for a Rust version 
@@ -27,7 +28,7 @@
 - ~~Ship as own APK for Android with DebianLiveCD4Android as base APK.~~
 - ~~Add proot-distro install script in the repo~
 - ~~Add screenshot (generate from logo.txt,~~ try chafta)
-- Missing basics: find, grep, which
+- Missing basics: find, grep, which, wait, getconf, pthread?, sed, file
 - Recycle bin
 - Fix KyaniteAndroid defaults to autoinstall and autostart the system by default in the first run (after apk install), to help non tech users.
 - CloudBackups
