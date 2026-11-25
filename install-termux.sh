@@ -36,9 +36,9 @@ fi
 cat > "$PREFIX/bin/kyanite" <<LAUNCHER
 #!$PREFIX/bin/sh
 if [ "\$#" -eq 0 ]; then
-  exec proot-distro login $NAME
+  exec proot-distro login $NAME --isolated --fix-low-ports
 else
-  exec proot-distro login $NAME -- "\$@"
+  exec proot-distro login $NAME --isolated --fix-low-ports -- "\$@"
 fi
 LAUNCHER
 chmod 755 "$PREFIX/bin/kyanite"
