@@ -23,7 +23,7 @@ on:
         description: "Regex (case-insensitive) that Kyanite must print on the serial console after booting"
         default: "kyanite"
       release_tag:
-        description: "Optional: existing release tag to upload a .zip per variant to (empty = do not publish)"
+        description: "Optional: existing release tag to upload the images to, one asset per file (empty = do not publish)"
         default: ""
 
 permissions:
@@ -564,10 +564,19 @@ jobs:
             echo "::error::some boot tests failed (see the job summary)"; exit 1
           fi
 
-      - name: Publish a zip to a release (optional)
+      - name: Publish release assets (optional)
         if: inputs.release_tag != ''
         run: |
           set -euo pipefail
-          FILES=$(ls kyanite-x86_64*.img kyanite-x86_64*.vdi kyanite-x86_64*.vmdk kyanite-x86_64*-live.iso 2>/dev/null || true)
-          zip -9 -q "$NAME-bootable.zip" $FILES README.txt
-          gh release upload "$RELEASE_TAG" "$NAME-bootable.zip" --repo "$REPO" --clobber
+          # One asset per file. ISOs, .vdi and .vmdk go up as they are; the raw disk images are zipped
+          # (they are mostly empty space, so the zip is a fraction of their size).
+          if [ "$VARIANT" = hardware ]; then
+            zip -9 -q kyanite-x86_64-hw-img.zip kyanite-x86_64-hw.img
+            ASSETS="kyanite-x86_64-hw-live.iso kyanite-x86_64-hw-img.zip"
+          else
+            zip -9 -q kyanite-x86_64.img.zip kyanite-x86_64.img
+            ASSETS="kyanite-x86_64-live.iso kyanite-x86_64.vdi kyanite-x86_64.vmdk kyanite-x86_64.img.zip"
+          fi
+          gh release upload "$RELEASE_TAG" $ASSETS --repo "$REPO" --clobber
+          echo "Assets now in release $RELEASE_TAG:"
+          gh release view "$RELEASE_TAG" --repo "$REPO" --json assets -q '.assets[] | "  \(.name)  \(.size) bytes"'
