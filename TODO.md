@@ -34,6 +34,7 @@
 - Basics are being made here: https://github.com/StringManolo/uutils-extra (IMPORTANT: Include them in the workflow to ship right arch into rootfs)
 - Recycle bin
 - Fix KyaniteAndroid defaults to autoinstall and autostart the system by default in the first run (after apk install), to help non tech users.
+- System and normal, should be defaults in settings
 - CloudBackups
 - Remove spanish from init and build workflow
 - Add openrc and needed hooks

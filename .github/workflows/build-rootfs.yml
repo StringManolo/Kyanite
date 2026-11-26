@@ -173,6 +173,8 @@ jobs:
       # ============================================================
 
       - name: Assemble Kyanite Rootfs Structure
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
