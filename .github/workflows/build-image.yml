@@ -571,8 +571,8 @@ jobs:
           # One asset per file. ISOs, .vdi and .vmdk go up as they are; the raw disk images are zipped
           # (they are mostly empty space, so the zip is a fraction of their size).
           if [ "$VARIANT" = hardware ]; then
-            zip -9 -q kyanite-x86_64-hw-img.zip kyanite-x86_64-hw.img
-            ASSETS="kyanite-x86_64-hw-live.iso kyanite-x86_64-hw-img.zip"
+            zip -9 -q kyanite-x86_64-hw.img.zip kyanite-x86_64-hw.img
+            ASSETS="kyanite-x86_64-hw-live.iso kyanite-x86_64-hw.img.zip"
           else
             zip -9 -q kyanite-x86_64.img.zip kyanite-x86_64.img
             ASSETS="kyanite-x86_64-live.iso kyanite-x86_64.vdi kyanite-x86_64.vmdk kyanite-x86_64.img.zip"

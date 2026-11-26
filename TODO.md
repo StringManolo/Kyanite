@@ -17,6 +17,8 @@
 - ~~PRIORITY Add autopdate from nightly realeases created from github actions (only when a core component updates) (check how to automatize to rebuild on security related updates of any of the sofware) (download the tarball, readchangelogs or missmatched sha, and replace)~~
 - Balance between using musl static vs glib dinamic for shiped bins
 - Check for new features
+- Add user, roles, etc for PC images (by default is root user)
+- Avoid supply chain attacks to access repo secrets on all 3 repos
 
 ### Quality Of Life
 - Add better logs to init (translate to english too)
@@ -34,11 +36,13 @@
 - Fix KyaniteAndroid defaults to autoinstall and autostart the system by default in the first run (after apk install), to help non tech users.
 - CloudBackups
 - Remove spanish from init and build workflow
+- Add openrc and needed hooks
 - Swap Kernel + Check Rufus installs
 - Patch apps that work but they think they don't like nmap (using hook)
 - Include support for X11?
 - ~~Test different vimrc configs and themes (exclude from vim-tiny?)~~
-- translate SECURITY.md
+- update/translate SECURITY.md
+- Fix gcc libs not installed properly (need hooks)
 - Add support for arm32
 - Full KyaniteAndroid translation to the 4 supported languages)
 - Basic GUI for PC users of the Hardware image
@@ -74,6 +78,10 @@
 ### Visuals and Experience
 - Add welcome.txt in /root
 - Add manual.txt in different languages in /root
+
+
+### Documentation
+- Fix glossary
 
 
 ### Other
