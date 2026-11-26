@@ -28,7 +28,7 @@
 - ~~Ship as own APK for Android with DebianLiveCD4Android as base APK.~~
 - ~~Add proot-distro install script in the repo~
 - ~~Add screenshot (generate from logo.txt,~~ try chafta)
-- Missing basics: find, grep, which, wait, getconf, pthread?, sed, file, command
+- Missing basics: find, grep, which, wait, getconf, pthread?, sed, file, command, nc
 - Basics are being made here: https://github.com/StringManolo/uutils-extra (IMPORTANT: Include them in the workflow to ship right arch into rootfs)
 - Recycle bin
 - Fix KyaniteAndroid defaults to autoinstall and autostart the system by default in the first run (after apk install), to help non tech users.

@@ -231,7 +231,7 @@ jobs:
 
           UUTILS_EXTRA_TAR="uutils-extra-${KYANITE_VERSION}-${{ matrix.rust_target }}.tar.gz"
 
-          gh release download latest \
+          gh release download \
             --repo StringManolo/uutils-extra \
             --pattern "uutils-extra-*-${{ matrix.rust_target }}.tar.gz" \
             --output "$UUTILS_EXTRA_TAR"
