@@ -225,6 +225,26 @@ jobs:
           done
 
           # --------------------------------------------------------
+          # 7.1b Install uutils-extra (latest release)
+          # --------------------------------------------------------
+          echo "Installing uutils-extra (latest release)..."
+
+          UUTILS_EXTRA_TAR="uutils-extra-${KYANITE_VERSION}-${{ matrix.rust_target }}.tar.gz"
+
+          gh release download latest \
+            --repo StringManolo/uutils-extra \
+            --pattern "uutils-extra-*-${{ matrix.rust_target }}.tar.gz" \
+            --output "$UUTILS_EXTRA_TAR"
+
+          mkdir -p uutils-extra-tmp
+          tar -xzf "$UUTILS_EXTRA_TAR" -C uutils-extra-tmp
+
+          find uutils-extra-tmp -maxdepth 1 -type f -executable -exec install -D -m 0755 {} "$ARCH_DIR/usr/bin/" \;
+
+          rm -rf uutils-extra-tmp "$UUTILS_EXTRA_TAR"
+          echo "uutils-extra installed: $(ls "$ARCH_DIR/usr/bin/" | grep -E '^(hexdump|xxd|...)$' | tr '\n' ' ')"
+
+          # --------------------------------------------------------
           # 7.2 Shell entry point
           # --------------------------------------------------------
 
