@@ -568,8 +568,26 @@ jobs:
           # --------------------------------------------------------
           echo "Generating command hints..."
 
-          bash tools/generate-command-hints.sh \
-            "$ARCH_DIR" "$PWD/brush-host/bin/brush"
+          echo "=== HINT GENERATOR DIAGNOSTICS ==="
+          echo "ARCH_DIR=$ARCH_DIR"
+          echo "PWD=$PWD"
+          echo "=== HOST BRUSH ==="
+          ls -l "$PWD/brush-host/bin/brush" || true
+          if [ -x "$PWD/brush-host/bin/brush" ]; then
+            "$PWD/brush-host/bin/brush" -c 'compgen -b' || true
+          else
+            echo "ERROR: Host Brush missing or not executable"
+          fi
+          echo "=== ROOTFS DIRECTORIES ==="
+          ls -ld "$ARCH_DIR/bin" "$ARCH_DIR/usr/bin" "$ARCH_DIR/sbin" "$ARCH_DIR/usr/sbin" "$ARCH_DIR/etc/kyanite" || true
+          echo "=== GENERATOR TRACE ==="
+          if bash -x tools/generate-command-hints.sh "$ARCH_DIR" "$PWD/brush-host/bin/brush"; then
+            echo "Command hints generated successfully."
+          else
+            status=$?
+            echo "::error::Command hint generator failed with exit code $status"
+            exit "$status"
+          fi
 
 
 
