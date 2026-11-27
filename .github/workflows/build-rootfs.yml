@@ -546,7 +546,7 @@ jobs:
 
           echo "Applying rootfs-overlay..."
 
-          cp -a rootfs-overlay/. "$ARCH_DIR/"
+          cp -a --remove-destination rootfs-overlay/. "$ARCH_DIR/"
 
           # Git does not guarantee modes on every checkout: enforce them.
           find "$ARCH_DIR/etc/update-motd.d" -type f -exec chmod 0755 {} +

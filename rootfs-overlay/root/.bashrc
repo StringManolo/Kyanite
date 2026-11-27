@@ -287,6 +287,9 @@ declare -A _KX_MISSING=(
     [strace]=strace
     [nc]=netcat
     [bash-completion]=bash-completion
+
+    # Libc-bin
+    [locale]=libc-bin
 )
 
 # Loop through the map and define a function ONLY for missing commands.
