@@ -11,9 +11,14 @@ brush=${2:-}
 
 # 2. Every executable name shipped in the image.
 #    Adjust these dirs to match the runtime $PATH of the image.
+search_dirs=()
+for dir in "$rootfs/bin" "$rootfs/usr/bin" "$rootfs/sbin" "$rootfs/usr/sbin"; do
+  [[ -d "$dir" ]] && search_dirs+=("$dir")
+done
+
 names=$(
-  find "$rootfs/bin" "$rootfs/usr/bin" "$rootfs/sbin" "$rootfs/usr/sbin" \
-       -mindepth 1 -maxdepth 1 \( -type f -o -type l \) -printf '%f\n' 2>/dev/null | sort -u
+  find "${search_dirs[@]}" \
+       -mindepth 1 -maxdepth 1 \( -type f -o -type l \) -printf '%f\n' | sort -u
 )
 names=$'\n'"$names"$'\n'
 
