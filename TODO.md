@@ -65,7 +65,7 @@
 - Test sh and env bash scripts (needs some thinking here about glue by default by allowing user to swap to bash, maybe a security warning with a list of options build into Kpkg)
 - /bin/sh points to the init directory. Any Debian package with #!/bin/sh would launch the init directory instead of a shell. That's why the MOTD runs its scripts with /bin/brush. A future solution is to have the init directory, if it's not PID 1, execute brush with the received arguments.
 - The workflow uses Ubuntu packages, not Debian. It runs on ubuntu-latest, and `apt-get download` downloads Ubuntu's glibc, but `kpkg` installs from Debian stable. If Debian stable has a newer version of glibc, there might be incompatibilities. The solution would be to build it inside a `debian:stable` container.
-
+- Program nightly releases when any core dependency updates (requires tracking)
 
 ### Size
 - ~~Remove /usr/share/vim/vim91/doc/version9.txt (2 MB)~~
