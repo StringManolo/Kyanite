@@ -187,137 +187,35 @@ extract() {
 }
 
 
+# --- Missing command hints ---
+# Command -> package map.
+[ -r /etc/kyanite/hint-map.sh ] && . /etc/kyanite/hint-map.sh
 
-# =============================================================================
-# Kyanite: install hints for missing optional commands
-# =============================================================================
-
-declare -A _KX_MISSING=(
-    # --- procps ---
-    [ps]=procps
-    [pkill]=procps
-    [pgrep]=procps
-    [top]=procps
-    [free]=procps
-    [uptime]=procps
-    [watch]=procps
-
-    # --- util-linux ---
-    [dmesg]=util-linux
-    [lscpu]=util-linux
-    [lsmem]=util-linux
-    [getopt]=util-linux
-    [more]=util-linux
-    [whereis]=util-linux
-    [rev]=util-linux
-    [lsblk]=util-linux
-    [blkid]=util-linux
-    [fdisk]=util-linux
-    [cfdisk]=util-linux
-    [mount]=util-linux
-    [umount]=util-linux
-    [hwclock]=util-linux
-
-    # --- bsdextrautils ---
-    [hexdump]=bsdextrautils
-    [column]=bsdextrautils
-    [col]=bsdextrautils
-    [look]=bsdextrautils
-    [write]=bsdextrautils
-
-    # --- psmisc ---
-    [killall]=psmisc
-    [pstree]=psmisc
-    [fuser]=psmisc
-
-    # --- net-tools ---
-    [ifconfig]=net-tools
-    [netstat]=net-tools
-
-    # --- iputils ---
-    [ping]=iputils
-
-    # --- standalone system utilities ---
-    [lsof]=lsof
-    [tree]=tree
-    [unzip]=unzip
-    [zip]=zip
-    [curl]=curl
-    [wget]=wget
-    [vim]=vim
-    [nano]=nano
-
-    # --- development and languages ---
-    [node]=nodejs
-    [npm]=npm
-    [python3]=python3
-    [pip3]=python3-pip
-    [gcc]=build-essential
-    [make]=build-essential
-    [git]=git
-    [docker]=docker.io
-    [go]=golang
-    [rustc]=rustc
-
-    # --- networking ---
-    [dig]=bind-utils
-    [nslookup]=bind-utils
-    [telnet]=telnet
-    [traceroute]=traceroute
-
-    # --- modern terminal utilities ---
-    [htop]=htop
-    [btop]=btop
-    [ncdu]=ncdu
-    [duf]=duf
-    [tmux]=tmux
-    [fzf]=fzf
-    [rg]=ripgrep
-    [bat]=bat
-    [eza]=eza
-    [jq]=jq
-    [tldr]=tldr
-    [rz]=lrzsz
-    [sz]=lrzsz
-
-    # --- diagnostics ---
-    [iotop]=iotop
-    [iostat]=sysstat
-    [mpstat]=sysstat
-    [strace]=strace
-    [nc]=netcat
-    [bash-completion]=bash-completion
-
-    # Libc-bin
-    [locale]=libc-bin
-)
-
-# Loop through the map and define a function ONLY for missing commands.
-for _kx_cmd in "${!_KX_MISSING[@]}"; do
-    # If the binary is already in PATH, do nothing.
-    if type -P "$_kx_cmd" &>/dev/null; then
-        continue
+if [ -r /etc/kyanite/command-hints.sh ]; then
+  # Precomputed at image build time: pure function definitions, no detection.
+  . /etc/kyanite/command-hints.sh
+elif ((${#_KX_MISSING[@]})); then
+  # Fallback for hand-built trees: detect at runtime.
+  _kx_functions=""
+  for _kx_cmd in "${!_KX_MISSING[@]}"; do
+    type -t "$_kx_cmd" >/dev/null 2>&1 && continue
+    _kx_functions+="
+$_kx_cmd() {
+    local _kx_pkg='${_KX_MISSING[$_kx_cmd]}'
+    local _kx_exe
+    _kx_exe=\$(type -P '$_kx_cmd' 2>/dev/null)
+    if [[ -n \$_kx_exe ]]; then
+        unset -f '$_kx_cmd'
+        \"\$_kx_exe\" \"\$@\"
+        return \$?
     fi
+    printf '\033[31merror\033[0m: command not found: %s\n' '$_kx_cmd' >&2
+    printf 'hint: install it with: kpkg add %s\n' \"\$_kx_pkg\" >&2
+    return 127
+}
+"
+  done
+  [[ -n "$_kx_functions" ]] && eval "$_kx_functions"
+  unset _kx_cmd _kx_exe _kx_functions
+fi
 
-    # Define a function using the missing command's name.
-    eval "
-        $_kx_cmd() {
-            local _kx_pkg='${_KX_MISSING[$_kx_cmd]}'
-            local _kx_exe
-            _kx_exe=\$(type -P '$_kx_cmd')   # Re-check on every invocation
-
-            if [[ -n \$_kx_exe ]]; then
-                # The binary now exists: remove this function and run the real one.
-                unset -f '$_kx_cmd'
-                \"\$_kx_exe\" \"\$@\"
-                return \$?
-            fi
-
-            # Still missing: print the hint with 'error' in dark red.
-            printf '\033[38;5;88merror\033[0m: command not found: %s\n' '$_kx_cmd' >&2
-            printf 'hint: install it with: kpkg add %s\n' \"\$_kx_pkg\" >&2
-            return 127
-        }
-    "
-done
-unset _kx_cmd

@@ -114,6 +114,15 @@ jobs:
             --root ./brush-install
 
       # ============================================================
+      # 6a. BUILD HOST BRUSH (para generar command hints)
+      # ============================================================
+
+      - name: Build Host Brush Shell
+        run: |
+          cargo install brush-shell \
+            --root ./brush-host
+
+      # ============================================================
       # 6b. BUILD UUTILS COREUTILS (ls, cat, cp, mv, rm, ... en Rust)
       # ============================================================
 
@@ -553,6 +562,17 @@ jobs:
           find "$ARCH_DIR/etc/kyanite" -type f -exec chmod 0644 {} +
           chmod 0644 "$ARCH_DIR/etc/profile" "$ARCH_DIR/root/.bashrc"
 
+
+          # --------------------------------------------------------
+          # 7.11d Precompute missing-command hint stubs
+          # --------------------------------------------------------
+          echo "Generating command hints..."
+
+          bash tools/generate-command-hints.sh \
+            "$ARCH_DIR" "$PWD/brush-host/bin/brush"
+
+
+
           # /etc/os-release: identifies the build (used by the MOTD)
           {
             echo 'NAME="Kyanite"'
@@ -598,6 +618,15 @@ jobs:
 
           echo ""
           echo "========== ROOTFS VERIFICATION =========="
+
+          echo ""
+          echo "Missing command hints:"
+
+          ls -lh \
+            "$ARCH_DIR/etc/kyanite/hint-map.sh" \
+            "$ARCH_DIR/etc/kyanite/command-hints.sh"
+
+          tail -n 1 "$ARCH_DIR/etc/kyanite/command-hints.sh"
 
           ls -l "$ARCH_DIR/sbin/init"
           ls -l "$ARCH_DIR/bin/brush"
