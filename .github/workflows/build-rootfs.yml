@@ -227,9 +227,9 @@ jobs:
           done
 
           # --------------------------------------------------------
-          # 7.1b Install uutils-extra (latest release)
+          # 7.1b Install uutils-extra (latest release) — multicall only
           # --------------------------------------------------------
-          echo "Installing uutils-extra (latest release)..."
+          echo "Installing uutils-extra (multicall + symlinks)..."
 
           UUTILS_EXTRA_TAR="uutils-extra-${KYANITE_VERSION}-${{ matrix.rust_target }}.tar.gz"
 
@@ -241,10 +241,28 @@ jobs:
           mkdir -p uutils-extra-tmp
           tar -xzf "$UUTILS_EXTRA_TAR" -C uutils-extra-tmp
 
-          find uutils-extra-tmp -maxdepth 1 -type f -executable -exec install -D -m 0755 {} "$ARCH_DIR/usr/bin/" \;
+          install -D -m 0755 uutils-extra-tmp/uutils-extra-multicall \
+            "$ARCH_DIR/usr/bin/uutils-extra-multicall"
+
+          UUTILS_EXTRA_APPLETS=$(
+            find uutils-extra-tmp -maxdepth 1 -type f -executable \
+                 ! -name 'uutils-extra-multicall' \
+                 -printf '%f\n' | sort
+          )
+
+          if [ -z "$UUTILS_EXTRA_APPLETS" ]; then
+            echo "::error::no applets found in $UUTILS_EXTRA_TAR"
+            exit 1
+          fi
+
+          for applet in $UUTILS_EXTRA_APPLETS; do
+            ln -sfn uutils-extra-multicall "$ARCH_DIR/usr/bin/$applet"
+          done
 
           rm -rf uutils-extra-tmp "$UUTILS_EXTRA_TAR"
-          echo "uutils-extra installed: $(ls "$ARCH_DIR/usr/bin/" | grep -E '^(hexdump|xxd|...)$' | tr '\n' ' ')"
+          echo "uutils-extra symlinks: $(echo $UUTILS_EXTRA_APPLETS | tr '\n' ' ')"
+
+
 
           # --------------------------------------------------------
           # 7.2 Shell entry point
